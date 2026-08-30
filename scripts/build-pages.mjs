@@ -12,7 +12,7 @@
  * 刻意不做的事：不打包、不壓縮、不動 docs/data/（那是 ETL 產出的，另一條流程管）。
  * 「單一 HTML 檔」是這個專案的核心特性，不要為了幾 KB 破壞它。
  */
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -180,8 +180,44 @@ self.addEventListener('fetch', e => {
 `;
 writeFileSync(join(outDir, 'sw.js'), sw, 'utf8');
 
+/* ---------- 6. 自我驗證 ----------
+   驗證寫在這裡而不是 CI 的 shell 腳本裡，因為這支腳本本機每次都會跑，
+   壞掉當下就會被發現。之前把檢查寫在 workflow 的 shell 裡，用 [ -s ]
+   （非空）去檢查 .nojekyll —— 但那是個標記檔，本來就是 0 bytes，
+   於是「防止發佈壞東西」的那道檢查自己把每次發佈都擋掉了。 */
+const problems = [];
+const need = (rel, minBytes) => {
+  const f = join(outDir, rel);
+  if (!existsSync(f)) { problems.push(`缺少 ${rel}`); return; }
+  const n = statSync(f).size;
+  if (n < minBytes) problems.push(`${rel} 只有 ${n} bytes（至少要 ${minBytes}）`);
+};
+need('index.html', 100000);       // 內建 315 點的種子資料就佔掉大半，太小代表複製出錯
+need('manifest.webmanifest', 100);
+need('sw.js', 300);
+need('icon-192.png', 1000);
+need('apple-touch-icon.png', 1000);
+// .nojekyll 是標記檔，0 bytes 是正確的 —— 只檢查存在
+if (!existsSync(join(outDir, '.nojekyll'))) problems.push('缺少 .nojekyll');
+/* docs/ 是持久目錄而且有進版控，只檢查「檔案存在」會被上一次的產出遮住：
+   assets/ 整個不見了，這次一個圖示都沒複製到，檢查卻因為舊檔還在而通過。
+   所以也要檢查「這一次真的複製了東西」。 */
+if (copied === 0) problems.push('這次一個圖示都沒複製到（assets/ 是不是不見了？）');
+// index.html 必須真的帶著建置序號與 App 本體
+const outHtml = readFileSync(join(outDir, 'index.html'), 'utf8');
+if (!outHtml.includes(`const APP_BUILD='${BUILD}'`)) problems.push('index.html 沒有帶上建置序號');
+if (!outHtml.includes('manifest.webmanifest')) problems.push('index.html 沒有 manifest 連結');
+if (!/const SEED=/.test(outHtml)) problems.push('index.html 找不到內建點位資料');
+
+if (problems.length) {
+  console.error('✗ 產出不完整，不應該發佈：');
+  for (const p of problems) console.error('   · ' + p);
+  process.exit(1);
+}
+
 const kb = (Buffer.byteLength(html, 'utf8') / 1024).toFixed(0);
 console.log(`✓ docs/index.html（${kb} KB）· 建置序號 ${BUILD}`);
+console.log(`✓ 產出檢查通過（${6} 項）`);
 console.log(`✓ docs/manifest.webmanifest`);
 console.log(`✓ docs/sw.js（版本 ${ver}）`);
 console.log(`✓ 圖示 ${copied} 個、.nojekyll`);

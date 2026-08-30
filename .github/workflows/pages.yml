@@ -52,16 +52,10 @@ jobs:
       - name: 產生 docs/（index.html、manifest、sw.js、圖示）
         run: node scripts/build-pages.mjs
 
-      - name: 確認產出完整
+      # 產出檢查已經寫在 build-pages.mjs 裡（本機每次跑都會驗），
+      # 上一步失敗就不會走到這裡。這裡只補一個資料源的狀態說明。
+      - name: 資料源狀態
         run: |
-          set -e
-          for f in docs/index.html docs/manifest.webmanifest docs/sw.js docs/.nojekyll; do
-            [ -s "$f" ] || { echo "✗ 缺少或空白：$f"; exit 1; }
-          done
-          # index.html 應該要有 315 個內建點位的種子資料，太小代表複製出錯
-          SIZE=$(wc -c < docs/index.html)
-          [ "$SIZE" -gt 100000 ] || { echo "✗ index.html 只有 $SIZE bytes，明顯不對"; exit 1; }
-          echo "✓ index.html $SIZE bytes"
           if [ -f docs/data/speedcams.min.json ]; then
             echo "✓ 帶有資料源 $(wc -c < docs/data/speedcams.min.json) bytes"
           else
