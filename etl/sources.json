@@ -1,0 +1,262 @@
+{
+  "_comment": [
+    "鹿豹測速點位來源註冊表。新增一個縣市 = 在 sources 陣列加一筆。",
+    "priority 數字小的優先：去重時保留 priority 較小者的欄位。",
+    "urls 是候選清單，由上而下嘗試，第一個成功的為準（政府網站常換 resource id）。",
+    "verified 標示這個下載網址是否經過實地驗證；false 代表來自官方 metadata 但未實際下載成功。"
+  ],
+  "bbox": {
+    "lat": [
+      21.5,
+      26.5
+    ],
+    "lon": [
+      118.0,
+      122.5
+    ]
+  },
+  "dedupe_meters": 25,
+  "all_counties": [
+    "臺北市",
+    "新北市",
+    "桃園市",
+    "臺中市",
+    "臺南市",
+    "高雄市",
+    "基隆市",
+    "新竹市",
+    "新竹縣",
+    "苗栗縣",
+    "彰化縣",
+    "南投縣",
+    "雲林縣",
+    "嘉義市",
+    "嘉義縣",
+    "屏東縣",
+    "宜蘭縣",
+    "花蓮縣",
+    "臺東縣",
+    "澎湖縣",
+    "金門縣",
+    "連江縣"
+  ],
+  "sources": [
+    {
+      "id": "freeway",
+      "name": "國道公路固定式測速照相地點",
+      "group": "國道",
+      "agency": "內政部警政署國道公路警察局",
+      "page": "https://data.gov.tw/dataset/13940",
+      "urls": [
+        "https://www.tgos.tw/tgos/VirtualDir/Product/c2dd3a68-cafc-48fc-8a4a-7215ddc24cd3/1150720-國道公路固定式測速照相地點.zip"
+      ],
+      "kind": "zip",
+      "encoding": "auto",
+      "priority": 1,
+      "verified": false,
+      "note": "只提供 ZIP。tgos.tw 對非瀏覽器 UA 會回 403，腳本已帶瀏覽器 UA；仍失敗時請手動下載到 downloads/ 後用 --offline 執行。"
+    },
+    {
+      "id": "npa_counties",
+      "name": "測速執法設置點（警政署）",
+      "group": "省道/縣道",
+      "agency": "內政部警政署",
+      "page": "https://data.gov.tw/dataset/7320",
+      "urls": [
+        "https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/EA5E6FCD-B82D-43B7-A5CF-E9893253187E/resource/07AD1536-8B2D-462A-A772-086DE703F427/download",
+        "https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/EA5E6FCD-B82D-43B7-A5CF-E9893253187E/resource/DA356677-AEA0-44DE-9650-2CE630A27371/download"
+      ],
+      "kind": "csv",
+      "encoding": "utf-8",
+      "priority": 2,
+      "verified": true,
+      "note": "雙表頭（第2列是中文說明）。實際只涵蓋 9 個縣：金門、宜蘭、新竹縣、苗栗、彰化、南投、雲林、嘉義縣、屏東。不含六都，也不含基隆/新竹市/嘉義市/花蓮/臺東/澎湖/連江。"
+    },
+    {
+      "id": "taipei",
+      "name": "臺北市固定測速照相地點表",
+      "group": "六都",
+      "agency": "臺北市政府警察局交通警察大隊",
+      "page": "https://data.gov.tw/dataset/130111",
+      "urls": [
+        "https://data.taipei/api/dataset/745b8808-061f-4f5b-9a62-da1590c049a9/resource/5012e8ba-5ace-4821-8482-ee07c147fd0a/download"
+      ],
+      "kind": "csv",
+      "encoding": "big5",
+      "county": "臺北市",
+      "priority": 3,
+      "verified": true,
+      "note": "Big5 編碼，含區間測速。"
+    },
+    {
+      "id": "newtaipei",
+      "name": "新北市固定式測速照相地點",
+      "group": "六都",
+      "agency": "新北市政府警察局",
+      "page": "https://data.ntpc.gov.tw/datasets/99f3ff6e-0352-4399-a726-775ab765a1dc",
+      "urls": [
+        "https://data.ntpc.gov.tw/api/datasets/99f3ff6e-0352-4399-a726-775ab765a1dc/csv/file",
+        "https://data.ntpc.gov.tw/api/datasets/99f3ff6e-0352-4399-a726-775ab765a1dc/json?page=0&size=2000"
+      ],
+      "kind": "auto",
+      "encoding": "utf-8",
+      "county": "新北市",
+      "priority": 3,
+      "verified": true,
+      "note": "警政署標準 schema。約 13 筆的 direct 欄位直接是「區間測速」。"
+    },
+    {
+      "id": "taoyuan",
+      "name": "桃園市測速照相設備地點",
+      "group": "六都",
+      "agency": "桃園市政府警察局",
+      "page": "https://data.gov.tw/dataset/25935",
+      "urls": [
+        "https://opendata.tycg.gov.tw/api/dataset/ecd45ee5-4489-436b-bd08-7d4e4111c4a4/resource/36e77f60-dabe-4fd0-8f69-a99f9acfd6f4/download"
+      ],
+      "kind": "csv",
+      "encoding": "big5",
+      "county": "桃園市",
+      "priority": 3,
+      "verified": true,
+      "note": "Big5。欄位同國道版（座標緯度/座標經度），緯度在前。六都中資料最新。"
+    },
+    {
+      "id": "taichung_tech",
+      "name": "臺中市科技執法取締地點",
+      "group": "六都",
+      "agency": "臺中市政府警察局",
+      "page": "https://data.gov.tw/dataset/170673",
+      "urls": [
+        "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=b3f58c63-53b3-4c01-8203-2a7afa08bb13"
+      ],
+      "kind": "auto",
+      "encoding": "utf-8",
+      "county": "臺中市",
+      "priority": 4,
+      "verified": false,
+      "note": "只有經緯度與地點，沒有速限與方向。臺中真正的固定式測速那份（216 筆）下載連結是前端動態產生的，抓不到，請手動下載後放進 downloads/。"
+    },
+    {
+      "id": "tainan",
+      "name": "臺南市智慧管理科技執法設備設置地點",
+      "group": "六都",
+      "agency": "臺南市政府警察局",
+      "page": "https://data.gov.tw/dataset/139129",
+      "urls": [
+        "https://soa.tainan.gov.tw/Api/Service/Get/1c7e82f0-d6b2-4b20-aeff-5c768100f82c",
+        "https://data.tainan.gov.tw/File/ResourceCsvDownload/1c7e82f0-d6b2-4b20-aeff-5c768100f82c"
+      ],
+      "kind": "auto",
+      "encoding": "utf-8",
+      "county": "臺南市",
+      "priority": 4,
+      "verified": false,
+      "note": "⚠️ 這份沒有經緯度欄位，只有文字地址，腳本會全部丟棄並在報告中列為 no_coords。臺南要有座標必須自行 geocoding，或改用警察局的 PDF 人工整理。"
+    },
+    {
+      "id": "tainan_geocoded",
+      "name": "臺南市科技執法設備（座標為 geocoding 推算）",
+      "group": "六都",
+      "agency": "臺南市政府警察局",
+      "page": "https://data.gov.tw/dataset/139129",
+      "urls": [],
+      "kind": "csv",
+      "encoding": "utf-8",
+      "county": "臺南市",
+      "priority": 8,
+      "verified": false,
+      "note": "由 geocode_tainan.py 產生，請先跑該腳本並把 dist/tainan_geocoded.csv 複製到 downloads/tainan_geocoded.csv。座標是推算值不是官方公布值，所以 priority 設低，去重時官方座標優先。"
+    },
+    {
+      "id": "kaohsiung_111",
+      "name": "高雄市111年固定式違規照相及科技執法設置地點",
+      "group": "六都",
+      "agency": "高雄市政府警察局",
+      "page": "https://data.gov.tw/dataset/148455",
+      "urls": [
+        "https://openapi.kcg.gov.tw/Api/Service/Get/d300ae36-e3b7-41c1-aa27-39c48a6f8c4b",
+        "https://data.kcg.gov.tw/File/directDownload/d300ae36-e3b7-41c1-aa27-39c48a6f8c4b"
+      ],
+      "kind": "auto",
+      "encoding": "utf-8",
+      "county": "高雄市",
+      "priority": 3,
+      "verified": false,
+      "note": "欄位「座標緯N度」「座標經E度」。資料停留在 111 年（2022），是六都中最舊的。"
+    },
+    {
+      "id": "kaohsiung_109",
+      "name": "高雄市109年固定式違規闖紅燈及測速照相設備設置地點",
+      "group": "六都",
+      "agency": "高雄市政府警察局",
+      "page": "https://data.gov.tw/dataset/118231",
+      "urls": [
+        "https://openapi.kcg.gov.tw/Api/Service/Get/5dbf35bc-8bc2-4fbf-9204-d82daaa3e23c",
+        "https://data.kcg.gov.tw/File/DirectDownload/5dbf35bc-8bc2-4fbf-9204-d82daaa3e23c"
+      ],
+      "kind": "auto",
+      "encoding": "utf-8",
+      "county": "高雄市",
+      "priority": 5,
+      "verified": false,
+      "note": "警政署標準 schema，當作 111 年那份的補充（去重後只會補上 111 年沒有的點）。"
+    },
+    {
+      "id": "penghu",
+      "name": "澎湖縣固定式測速照相地點",
+      "group": "離島",
+      "agency": "澎湖縣政府警察局",
+      "page": "https://opendata.penghu.gov.tw/dataset/pb140320-2022-07-14-1657785496",
+      "urls": [
+        "https://opendata.penghu.gov.tw/dataset/99f233c2-df0b-4291-b899-81ac3684551b/resource/6ee742b9-1e89-40a5-aa1a-4ad5352161c5/download/pb140320-2022-07-14-1657785496.json"
+      ],
+      "kind": "auto",
+      "encoding": "utf-8",
+      "county": "澎湖縣",
+      "priority": 3,
+      "verified": true,
+      "note": "CKAN 平台，欄位與國道版相同（座標緯度/座標經度）。約 33 筆，涵蓋馬公、湖西、白沙、西嶼。2026-08 仍在更新，是所有縣市裡資料最完整的之一。"
+    },
+    {
+      "id": "chiayi_city",
+      "name": "嘉義市固定式測速照相設置地點",
+      "group": "縣市",
+      "agency": "嘉義市政府警察局交通隊",
+      "page": "https://data.gov.tw/dataset/52544",
+      "urls": [
+        "https://data.chiayi.gov.tw/opendata/api/getResource?oid=26242d8c-9340-4553-a67f-5084a37552d4&rid=4adcea0f-ee46-4a9f-bb6e-8f4f3a1817bb"
+      ],
+      "kind": "csv",
+      "encoding": "utf-8",
+      "county": "嘉義市",
+      "priority": 3,
+      "verified": false,
+      "note": "約 11 筆，欄位含經緯度、拍攝方向、速限。每年更新，最後更新 2026-04。"
+    },
+    {
+      "id": "hsinchu_city",
+      "name": "新竹市科學儀器及科技執法取締地點",
+      "group": "縣市",
+      "agency": "新竹市警察局",
+      "page": "https://tra.hccp.gov.tw/pages/camera",
+      "urls": [
+        "https://tra.hccp.gov.tw/pages/camera"
+      ],
+      "kind": "html",
+      "encoding": "utf-8",
+      "county": "新竹市",
+      "priority": 3,
+      "verified": false,
+      "note": "官網 HTML 表格（科技執法／固定式／移動式三張表），每筆都有經緯度。沒有開放資料集也沒有下載檔，只能解析 HTML。約 120 點。"
+    }
+  ],
+  "_missing_note": [
+    "以下縣市至今找不到含座標的機器可讀來源，需人工或 geocoding 補：",
+    "基隆市：警察局只發 PDF/DOC，約 72 處，只有路口名沒有座標 → 需 geocoding",
+    "花蓮縣：固定式只有「台9線284.9K」這種里程樁描述，沒有座標 → 需里程樁反算。區間測速另有資料集已上架 data.gov.tw 但查不到 id",
+    "臺東縣：data.gov.tw/dataset/177486 只提供 PDF，但 PDF 內含經緯度欄位 → 可解析 PDF 補上",
+    "連江縣（馬祖）：全台唯一完全沒有任何機器可讀來源。已知僅 4~12 點（南竿+北竿），建議人工維護",
+    "臺南市：官方資料集無座標欄位 → 用 geocode_tainan.py 補"
+  ]
+}

@@ -1,0 +1,29 @@
+name = "luleopard-hazards"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# 建立 KV namespace：
+#   npx wrangler kv namespace create HAZARDS
+#   npx wrangler kv namespace create HAZARDS --preview
+# 把它印出來的 id 填到下面，然後 npx wrangler deploy
+
+[[kv_namespaces]]
+binding = "HAZARDS"
+id = "把 wrangler 產生的 id 貼在這裡"
+preview_id = "把 preview id 貼在這裡"
+
+# 每 10 分鐘跟官方事件對帳一次，官方說結束就自動關掉對應的使用者回報。
+# 這是「不需要有人顧後台」的關鍵：施工/事故的結束時間官方本來就有。
+[triggers]
+crons = ["*/10 * * * *"]
+
+# TDX 金鑰請用 secret 存，不要寫在這個檔案裡：
+#   npx wrangler secret put TDX_ID
+#   npx wrangler secret put TDX_SECRET
+#   npx wrangler secret put ADMIN_TOKEN      # 保護手動觸發的 /reconcile
+[vars]
+# 實際端點路徑請對照 https://tdx.transportdata.tw/api-service/swagger 確認後填入
+TDX_INCIDENT_URL = ""
+
+[observability]
+enabled = true

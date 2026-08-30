@@ -1,0 +1,85 @@
+name: 更新測速點位資料
+
+on:
+  schedule:
+    # 每週一台灣時間 06:00（UTC 22:00 星期日）
+    - cron: "0 22 * * 0"
+  workflow_dispatch:          # 也可以在 Actions 頁面手動按一下就跑
+  push:
+    paths:
+      - "etl/**"
+      - ".github/workflows/update-speedcams.yml"
+
+permissions:
+  contents: write        # 只需要 commit docs/data，發佈是 pages.yml 的事
+
+concurrency:
+  group: speedcams
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 腳本只用標準函式庫，沒有 pip install 這一步
+
+      - name: 抓取並合併各來源
+        id: build
+        run: |
+          python3 etl/build_speedcams.py \
+            --out docs/data \
+            --no-fallback \
+            --fail-under 300
+        # --no-fallback：正式建置一律以網路為準。不加這個的話，某個來源掛掉時
+        #   會安靜地退回 etl/downloads/ 內的測試樣本檔（每個只有幾筆），
+        #   建出來看起來成功、實際上是假資料。
+        # --fail-under：合併後點數低於 300 就讓這個 job 失敗，
+        #   避免某天政府網站改版導致抓到空檔、把好資料覆蓋掉。
+        #   第一次跑完請看 Summary 的實際點數，再把門檻調到約正常值的 70%。
+
+      # 路網幾何：資料量大且很少變動，只在每月 1 號或手動觸發時重建
+      - name: 建立路網幾何（每月一次）
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.schedule, '0 22')
+        continue-on-error: true          # Overpass 忙碌時不要害整個流程失敗
+        run: |
+          if [ ! -f docs/data/roadnet.min.json ] || [ "$(date +%d)" = "01" ]; then
+            python3 etl/build_roadnet.py --out docs/data --classes motorway,trunk
+          else
+            echo "路網已存在且不是月初，略過"
+          fi
+
+      - name: 顯示報告
+        if: always()
+        run: |
+          cat docs/data/report.md >> $GITHUB_STEP_SUMMARY
+          [ -f docs/data/roadnet.report.md ] && cat docs/data/roadnet.report.md >> $GITHUB_STEP_SUMMARY || true
+
+      - name: 上傳報告當作 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speedcams-report
+          path: docs/data/report.*
+
+      - name: 有變動才 commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data
+          if git diff --staged --quiet; then
+            echo "資料沒有變化，不 commit"
+          else
+            N=$(python3 -c "import json;print(json.load(open('docs/data/report.json'))['total_points'])")
+            git commit -m "資料更新：共 ${N} 點 ($(date -u +%Y-%m-%d))"
+            git push
+          fi
+
+  # 發佈交給 pages.yml —— 它會在這個流程結束後自動觸發（workflow_run）。
+  # 這裡不自己部署，是因為那樣會有兩條部署路徑搶同一個 Pages 環境，
+  # 而且 deploy job 重新 checkout 時常常抓到 build job push 之前的 commit。

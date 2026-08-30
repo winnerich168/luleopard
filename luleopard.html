@@ -1,0 +1,3265 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="鹿豹">
+<title>鹿豹 · 測速預報</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --bg:#0b0f14; --panel:#121922; --panel2:#1a2330; --line:#243040;
+  --txt:#e8eef6; --dim:#8798ad;
+  --ok:#2fd07a; --warn:#ffc043; --danger:#ff4d4d; --info:#4aa8ff; --accent:#c9a227;
+  --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+body{display:flex;flex-direction:column;padding-top:var(--safe-t);padding-bottom:var(--safe-b)}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer;font-size:15px}
+.hidden{display:none!important}
+
+/* ---------- HUD ---------- */
+#hud{flex:0 0 auto;background:linear-gradient(180deg,#141c26,#0d131b);border-bottom:1px solid var(--line);
+  padding:8px 12px 10px;position:relative;z-index:500}
+#hudTop{display:flex;align-items:center;gap:10px}
+#spdBox{display:flex;flex-direction:column;align-items:center;min-width:96px}
+#spd{font-size:52px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums}
+#spdUnit{font-size:11px;color:var(--dim);letter-spacing:2px;margin-top:2px}
+#alertBox{flex:1;min-width:0;border-radius:12px;padding:9px 12px;background:var(--panel2);border:1px solid var(--line);
+  transition:background .18s,border-color .18s}
+#alertBox.t1{background:#1b2a3d;border-color:#2f6fb0}
+#alertBox.t2{background:#3a3110;border-color:var(--warn)}
+#alertBox.t3{background:#3f1616;border-color:var(--danger);animation:pulse .7s infinite alternate}
+@keyframes pulse{from{box-shadow:0 0 0 0 rgba(255,77,77,.0)}to{box-shadow:0 0 0 6px rgba(255,77,77,.18)}}
+#alertTitle{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+#alertSub{font-size:12px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#alertDist{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+#limitBadge{width:56px;height:56px;border-radius:50%;background:#fff;color:#111;display:flex;align-items:center;
+  justify-content:center;font-weight:800;font-size:22px;border:5px solid var(--danger);flex:0 0 auto}
+#limitBadge.off{opacity:.18}
+#hudBar{height:6px;border-radius:3px;background:#222c3a;margin-top:8px;overflow:hidden}
+#hudBarFill{height:100%;width:0;background:var(--info);transition:width .3s linear}
+#statusRow{display:flex;gap:8px;align-items:center;margin-top:7px;font-size:11px;color:var(--dim);flex-wrap:wrap}
+.dot{width:7px;height:7px;border-radius:50%;background:#555;display:inline-block;margin-right:4px;vertical-align:1px}
+.dot.on{background:var(--ok)} .dot.err{background:var(--danger)} .dot.sim{background:var(--accent)}
+.dot.warn{background:var(--warn)}
+.gpswarn{margin-top:7px;padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.5;border:1px solid}
+.gpswarn.warn{background:#3a3110;border-color:var(--warn);color:#ffe6a8}
+.gpswarn.bad{background:#3f1616;border-color:var(--danger);color:#ffd0d0}
+.gpswarn>div:first-child{font-weight:700;margin-bottom:2px}
+.covgrid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.covok{background:#16331f;border:1px solid #2fd07a55;color:#9de8bd;border-radius:6px;padding:4px 8px;font-size:12px}
+.covok b{color:#2fd07a;margin-left:2px}
+.covmiss{margin-top:9px;padding:8px 10px;border-radius:8px;background:#3f1616;
+         border:1px solid var(--danger);color:#ffd0d0;font-size:12px;line-height:1.6}
+
+/* ---------- views ---------- */
+#views{flex:1;position:relative;overflow:hidden}
+.view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none}
+.view.active{display:block}
+#map{position:absolute;inset:0}
+#radarWrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#0a0e13}
+#radar{max-width:100%;max-height:100%}
+.pad{padding:14px 14px 90px}
+
+/* ---------- generic ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px;margin-bottom:11px}
+.card h3{margin:0 0 9px;font-size:14px;letter-spacing:.5px;color:var(--txt);display:flex;align-items:center;gap:7px}
+.card h3 small{font-weight:400;color:var(--dim);font-size:11px;letter-spacing:0}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #1b2531}
+.row:last-child{border-bottom:none}
+.row label{font-size:14px}
+.row .hint{font-size:11px;color:var(--dim);margin-top:2px;line-height:1.45}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;font-size:14px;font-weight:600}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--info);border-color:var(--info);color:#04121f}
+.btn.danger{background:#3a1414;border-color:#6b2020;color:#ff9c9c}
+.btn.gold{background:var(--accent);border-color:var(--accent);color:#1a1400}
+.btn.wide{width:100%;display:block;text-align:center;margin-top:8px}
+.btn.sm{padding:6px 10px;font-size:12px;border-radius:8px}
+input[type=text],input[type=number],input[type=password],select,textarea{
+  background:#0d141d;border:1px solid var(--line);border-radius:9px;color:var(--txt);padding:9px 10px;font-size:14px;
+  font-family:inherit;width:100%}
+textarea{resize:vertical;min-height:74px}
+.sw{position:relative;width:48px;height:28px;flex:0 0 auto}
+.sw input{opacity:0;width:100%;height:100%;margin:0;position:absolute;z-index:2}
+.sw span{position:absolute;inset:0;background:#2a3646;border-radius:14px;transition:.2s}
+.sw span:after{content:"";position:absolute;width:22px;height:22px;border-radius:50%;background:#8fa0b5;top:3px;left:3px;transition:.2s}
+.sw input:checked+span{background:#1e5f3c}
+.sw input:checked+span:after{transform:translateX(20px);background:var(--ok)}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.chip{padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);font-size:13px}
+.chip.sel{background:var(--info);border-color:var(--info);color:#04121f;font-weight:700}
+.empty{color:var(--dim);font-size:13px;text-align:center;padding:22px 8px}
+.tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+.tag.sec{border-color:var(--accent);color:var(--accent)}
+.tag.usr{border-color:var(--info);color:var(--info)}
+.rb{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;
+  background:#1e3a5c;color:#9ecbff;border:1px solid #2f6fb0;vertical-align:1px;margin-left:2px}
+.rb.one{background:#232f3d;color:var(--dim);border-color:var(--line)}
+.rb.warm{background:#4a3410;color:#ffc043;border-color:#8a6320}
+.rb.hot{background:#4d1717;color:#ff9c9c;border-color:#8a2020}
+.sb{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;vertical-align:1px}
+.sb.ok{background:#14331f;color:#7fe0a8;border:1px solid #1e5f3c}
+.sb.mid{background:#3a3110;color:#ffc043;border:1px solid #8a6320}
+.sb.low{background:#2a2f36;color:var(--dim);border:1px solid var(--line)}
+.btn.sm.danger{background:#3a1414;border-color:#6b2020;color:#ff9c9c}
+.item{border-bottom:1px solid #1b2531;padding:10px 0}
+.item:last-child{border-bottom:none}
+.item .t{font-size:14px;font-weight:600;line-height:1.35}
+.item .m{font-size:11px;color:var(--dim);margin-top:3px}
+
+/* ---------- tabbar ---------- */
+#tabs{flex:0 0 auto;display:flex;background:#0d131b;border-top:1px solid var(--line);z-index:600}
+#tabs button{flex:1;padding:9px 2px 8px;font-size:10px;color:var(--dim);display:flex;flex-direction:column;
+  align-items:center;gap:3px}
+#tabs button .ic{font-size:19px;line-height:1}
+#tabs button.active{color:var(--info)}
+
+/* ---------- overlay ---------- */
+#gate{position:fixed;inset:0;background:rgba(6,9,13,.97);z-index:2000;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding:26px;text-align:center}
+#gate h1{font-size:30px;margin:0 0 4px;letter-spacing:4px}
+#gate .sub{color:var(--dim);font-size:13px;margin-bottom:26px;line-height:1.7;max-width:330px}
+#gate .gatever{display:flex;align-items:center;gap:8px;margin:0 0 14px;font-size:12px;color:var(--dim);
+  letter-spacing:1px}
+#gate .betabox{background:#2a2113;border:1px solid var(--warn);color:#ffe6a8;border-radius:9px;
+  padding:11px 13px;font-size:12px;line-height:1.75;max-width:340px;margin:0 0 22px;text-align:left}
+#gate .betabox b{display:block;color:var(--warn);font-size:12.5px;margin-bottom:3px}
+.betabadge{display:inline-block;background:var(--warn);color:#241a05;font-weight:800;
+  font-size:11px;letter-spacing:1px;border-radius:5px;padding:2px 7px;line-height:1.5}
+.betabadge.sm{font-size:9.5px;padding:1px 5px;letter-spacing:.5px}
+.buildno{font-size:10px;color:var(--dim);opacity:.75;letter-spacing:.3px;
+  font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+#gate .warn{font-size:11px;color:var(--dim);margin-top:22px;max-width:330px;line-height:1.7;border-top:1px solid var(--line);padding-top:14px}
+#toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:#1c2733;border:1px solid var(--line);
+  padding:10px 16px;border-radius:10px;font-size:13px;z-index:1800;opacity:0;transition:opacity .25s;pointer-events:none;max-width:88vw}
+#toast.show{opacity:1}
+.leaflet-container{background:#0a0e13}
+
+/* ---------- 一鍵通報 ---------- */
+#fabWrap{position:absolute;right:14px;bottom:18px;z-index:900;display:flex;flex-direction:column;
+  align-items:center;gap:10px}
+.fab{border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  box-shadow:0 6px 20px rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.22)}
+.fab.big{font-size:28px;line-height:1}
+.fab.big span{font-size:11px;font-weight:700;margin-top:2px;letter-spacing:1px}
+.fab.big:active{transform:scale(.93)}
+/* 掉落物最常按，放在最下面（拇指最好搆到）且最大 */
+.fab.drop{width:84px;height:84px;background:linear-gradient(160deg,#ff8a3d,#e06a1f);font-size:30px}
+/* 事故比較少見但更緊急，正紅色、位置在上，靠顏色和大小就能盲按 */
+.fab.crash{width:70px;height:70px;background:linear-gradient(160deg,#ff4d4d,#b81414);
+  box-shadow:0 6px 20px rgba(184,20,20,.5),0 0 0 1px rgba(255,255,255,.12)}
+.fab.cam{width:60px;height:60px;background:linear-gradient(160deg,#4aa8ff,#1a5fb4);font-size:24px}
+.fab.cam span{font-size:10px}
+.fab.small{width:46px;height:46px;background:#1d2836;font-size:20px}
+#fabMenu{position:absolute;right:14px;bottom:118px;z-index:901;background:#161f2b;border:1px solid var(--line);
+  border-radius:14px;padding:8px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+  box-shadow:0 10px 30px rgba(0,0,0,.6);max-width:290px}
+#fabMenu button{padding:11px 6px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);
+  font-size:11px;display:flex;flex-direction:column;align-items:center;gap:4px}
+#fabMenu button b{font-size:20px;font-weight:400;line-height:1}
+#fabMenuBar{grid-column:1/-1;height:3px;border-radius:2px;background:#2a3646;overflow:hidden;margin-bottom:2px}
+#fabMenuBar i{display:block;height:100%;width:100%;background:var(--accent);transform-origin:left center}
+#fabMenuBar i.run{animation:fabCountdown var(--fabms,6000ms) linear forwards}
+@keyframes fabCountdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+
+/* ---------- 危害警示列 ---------- */
+#secRow{display:none;align-items:center;gap:9px;margin-top:7px;padding:7px 11px;border-radius:10px;
+  background:#2c2410;border:1px solid var(--accent);font-size:13px}
+#secRow.show{display:flex}
+#secRow.over{background:#3f1616;border-color:var(--danger)}
+#secRow .ic{font-size:18px;line-height:1}
+#secRow .tx{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#secRow .dd{font-weight:800;font-variant-numeric:tabular-nums;font-size:17px}
+#hazRow{display:none;align-items:center;gap:9px;margin-top:7px;padding:7px 11px;border-radius:10px;
+  background:#2a1d10;border:1px solid #7a4a12;font-size:13px}
+#hazRow.show{display:flex}
+#hazRow.t3{background:#3f1616;border-color:var(--danger)}
+#hazRow.faded{opacity:.62;background:#232b34;border-color:var(--line)}
+#hazRow .ic{font-size:19px;line-height:1}
+#hazRow .tx{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#hazRow .dd{font-weight:700;font-variant-numeric:tabular-nums}
+
+/* ---------- 樁號盤 ---------- */
+.warnbar{background:#2a1d10;border:1px solid #7a4a12;border-radius:11px;padding:10px 12px;
+  font-size:12.5px;line-height:1.6;margin-bottom:11px;color:#ffd9a8}
+#kmHead{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-bottom:9px}
+#kmHead>div:first-child{min-width:0;flex:1}
+.kmRoad{font-size:17px;font-weight:700}
+#kmNow{font-size:40px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;color:var(--accent)}
+#kmNow:after{content:"K";font-size:16px;margin-left:2px;color:var(--dim)}
+.kmAdj{display:flex;gap:6px;flex-wrap:wrap}
+.kmchips{display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px;-webkit-overflow-scrolling:touch}
+.kmchips button{flex:0 0 auto;padding:11px 13px;border-radius:10px;border:1px solid var(--line);
+  background:var(--panel2);font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.kmchips button.now{border-color:var(--accent);color:var(--accent)}
+.kmchips button.sel{background:var(--danger);border-color:var(--danger);color:#fff}
+.kmchips button.past{opacity:.5}
+
+/* ---------- 區間測速 ---------- */
+#secBig{display:flex;align-items:center;justify-content:center;gap:16px;margin:6px 0 12px}
+#secBig>div{text-align:center}
+#secAvg,#secLim{font-size:42px;font-weight:800;line-height:1.05;font-variant-numeric:tabular-nums}
+#secAvg{color:var(--ok)} #secAvg.over{color:var(--danger)}
+#secLim{color:var(--dim)}
+#secVs{color:var(--dim);font-size:13px;align-self:center}
+.secLbl{font-size:10px;color:var(--dim);letter-spacing:1px}
+#secBar{height:10px;border-radius:5px;background:#222c3a;overflow:hidden;margin-bottom:6px}
+#secBarFill{height:100%;width:0;background:var(--ok);transition:width .4s linear}
+#secBarFill.over{background:var(--danger)}
+#tripStats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+.stat .v{font-size:23px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+.stat .k{font-size:11px;color:var(--dim);margin-top:2px}
+.stat .v small{font-size:12px;color:var(--dim);font-weight:400;margin-left:2px}
+.over-badge{background:#4d1717;color:#ff9c9c;border:1px solid #8a2020;font-size:10px;
+  padding:2px 7px;border-radius:999px;font-weight:700}
+.ok-badge{background:#14331f;color:#7fe0a8;border:1px solid #1e5f3c;font-size:10px;
+  padding:2px 7px;border-radius:999px;font-weight:700}
+#tabs button .ic{font-size:18px}
+.mk{border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
+</style>
+</head>
+<body>
+
+<!-- ══════════ HUD ══════════ -->
+<div id="hud">
+  <div id="hudTop">
+    <div id="spdBox"><div id="spd">--</div><div id="spdUnit">KM/H</div></div>
+    <div id="alertBox">
+      <div id="alertTitle"><span id="alertIcon">🛡️</span><span id="alertLabel">前方無測速點</span>
+        <span id="alertDist" style="margin-left:auto"></span></div>
+      <div id="alertSub">等待 GPS 定位…</div>
+    </div>
+    <div id="limitBadge" class="off">--</div>
+  </div>
+  <div id="hudBar"><div id="hudBarFill"></div></div>
+  <div id="secRow"><span class="ic">📏</span><span class="tx" id="secRowTx"></span><span class="dd" id="secRowAvg"></span></div>
+  <div id="hazRow"><span class="ic" id="hazIc">⚠️</span><span class="tx" id="hazTx"></span><span class="dd" id="hazDd"></span></div>
+  <div id="statusRow">
+    <span><i class="dot" id="dGps"></i><span id="lGps">GPS 未啟動</span></span>
+    <span><i class="dot" id="dDb"></i><span id="lDb">0 點</span></span>
+    <span><i class="dot" id="dVoice"></i><span id="lVoice">語音</span></span>
+    <span id="simTag" class="hidden"><i class="dot sim"></i>模擬中</span>
+    <span id="powerTag" class="hidden"><i class="dot sim"></i>省電中</span>
+    <span id="accTag"></span>
+    <span><i class="dot" id="dWake"></i><span id="lWake">常亮</span></span>
+    <span class="betabadge sm" id="hudBadge" title="公測版">公測</span>
+    <span id="hudBuild" class="buildno"></span>
+  </div>
+  <!-- 定位品質警告：只有在真的不堪用時才出現。安靜地假裝在工作是最糟的壞法。 -->
+  <div id="gpsWarn" class="gpswarn hidden">
+    <div id="gpsWarnTitle"></div>
+    <div id="gpsWarnBody"></div>
+  </div>
+</div>
+
+<!-- ══════════ VIEWS ══════════ -->
+<div id="views">
+
+  <!-- 地圖 -->
+  <section class="view active" id="v-map">
+    <div id="map"></div>
+    <div id="radarWrap" class="hidden"><canvas id="radar" width="600" height="600"></canvas></div>
+    <!-- 一鍵通報：最常遇到的就是掉落物，單手可及、有復原時間 -->
+    <div id="fabWrap">
+      <button id="fabMore" class="fab small" title="其他類型">⋯</button>
+      <button id="fabCam" class="fab big cam" title="一鍵加入測速點">📷<span>測速</span></button>
+      <button id="fabCrash" class="fab big crash" title="回報事故">🚨<span>事故</span></button>
+      <button id="fabQuick" class="fab big drop" title="回報掉落物">📦<span>掉落物</span></button>
+    </div>
+    <div id="fabMenu" class="hidden"></div>
+  </section>
+
+  <!-- 旅程 -->
+  <section class="view" id="v-trip"><div class="pad">
+    <div class="card" id="secCard" style="display:none;border-color:var(--accent)">
+      <h3>📏 區間測速進行中 <small id="secRange"></small></h3>
+      <div id="secBig">
+        <div><div class="secLbl">目前平均</div><div id="secAvg">--</div><div class="secLbl">km/h</div></div>
+        <div id="secVs">vs</div>
+        <div><div class="secLbl">速限</div><div id="secLim">--</div><div class="secLbl">km/h</div></div>
+      </div>
+      <div id="secBar"><div id="secBarFill"></div></div>
+      <div class="row"><label>已走 / 全長</label><b id="secProg">—</b></div>
+      <div class="row"><label>剩餘</label><b id="secRemain">—</b></div>
+      <div class="row"><label>剩下這段最高可跑</label><b id="secMax">—</b></div>
+      <div class="hint" id="secHint" style="margin-top:8px"></div>
+      <button class="btn wide sm" id="btnSecAbort">取消這次計算</button>
+    </div>
+
+    <div class="card">
+      <h3>🚗 本次旅程 <small id="tripSince"></small></h3>
+      <div id="tripStats"></div>
+      <button class="btn wide sm" id="btnTripReset">重新開始一趟</button>
+    </div>
+
+    <div class="card">
+      <h3>📍 前方測速點 <small id="upCount"></small></h3>
+      <div id="upList"></div>
+    </div>
+
+    <div class="card">
+      <h3>✅ 已經過 <small id="passCount"></small></h3>
+      <div id="passList"></div>
+    </div>
+
+    <div class="card">
+      <h3>📏 本趟區間測速紀錄 <small id="secCount"></small></h3>
+      <div id="secList"></div>
+    </div>
+  </div></section>
+
+  <!-- 路況 -->
+  <section class="view" id="v-traffic"><div class="pad">
+    <div class="card">
+      <h3>📻 路況播報 <small id="trafficCount"></small></h3>
+      <div class="chips" id="trafficFilter"></div>
+      <div id="trafficList"></div>
+      <button class="btn wide" id="btnRefreshTraffic">重新整理路況</button>
+    </div>
+    <div class="card">
+      <h3>✍️ 手動輸入播報 <small>中廣 / 警廣 聽到的路況</small></h3>
+      <div class="row" style="border:none;padding-top:0">
+        <div class="hint">中廣與警廣的廣播內容沒有公開 API，聽到路況時在這裡記一筆，就會進入下面的清單並在接近時提醒你。</div>
+      </div>
+      <textarea id="bcInput" placeholder="例：國道5號南下 28K 雪隧內事故，車多回堵約 3 公里"></textarea>
+      <div class="chips" id="bcKind"></div>
+      <button class="btn wide primary" id="btnAddBroadcast">加入播報</button>
+    </div>
+  </div></section>
+
+  <!-- 回報 -->
+  <section class="view" id="v-report"><div class="pad">
+    <div class="warnbar">🚗 開車中請交給乘客或副駕操作。駕駛請用地圖頁右下角的一鍵通報。</div>
+
+    <div class="card">
+      <h3>🛣️ 用公里樁號標示 <small>高速公路最快最準</small></h3>
+      <div id="kmBox">
+        <div id="kmHead">
+          <div><div class="kmRoad" id="kmRoad">—</div><div class="hint" id="kmConf">等待定位…</div></div>
+          <div id="kmNow">--.-</div>
+        </div>
+        <div class="kmAdj">
+          <button class="btn sm" data-kmadj="-1">−1.0</button>
+          <button class="btn sm" data-kmadj="-0.1">−0.1</button>
+          <button class="btn sm" data-kmadj="0.1">+0.1</button>
+          <button class="btn sm" data-kmadj="1">+1.0</button>
+          <button class="btn sm gold" id="btnKmLock">校正為現在位置</button>
+        </div>
+        <div class="hint" style="margin:8px 0 4px">
+          看到路邊里程牌就按上面校正一次，之後會自動跟著車推進。<br>
+          下面是你<b>前後一分鐘內</b>會經過的樁號，直接點掉落物所在的那個：
+        </div>
+        <div id="kmChips" class="kmchips"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📸 用照片定位 <small>讀 EXIF 座標，不上傳照片</small></h3>
+      <div class="hint" style="margin-bottom:9px">
+        乘客拍下掉落物後選這張照片，App 只讀取拍攝當下的經緯度來定位，
+        <b>照片本身不會被保存或上傳</b>。手機相機需開啟定位權限才會寫入座標。
+      </div>
+      <button class="btn wide" id="btnPhoto">從照片讀取位置</button>
+      <input type="file" id="photoIn" accept="image/jpeg,image/*" class="hidden">
+      <div class="hint" id="photoStat"></div>
+    </div>
+
+    <div class="card">
+      <h3>📝 回報內容</h3>
+      <div class="row" style="border:none;padding-top:0"><label>類型</label></div>
+      <div class="chips" id="hazKind"></div>
+      <div class="row"><label>道路類別</label><div class="hint" style="text-align:right">決定提前多久警示</div></div>
+      <div class="chips" id="hazRoadClass"></div>
+      <div class="row"><label>位置</label></div>
+      <div class="chips" id="hazLane"></div>
+      <div class="row"><label>備註</label></div>
+      <input type="text" id="hazNote" placeholder="例：外側車道有輪胎皮">
+      <div class="hint" id="hazTarget" style="margin-top:8px"></div>
+      <button class="btn wide primary" id="btnHazSubmit">送出回報</button>
+      <button class="btn wide" id="btnPickOnMap">改用地圖長按選點</button>
+    </div>
+
+    <div class="card">
+      <h3>📡 共享回報 <small>讓附近的人也收到</small></h3>
+      <div class="hint" style="margin-bottom:9px">
+        填入你部署的 Cloudflare Worker 網址（<code>backend/</code> 內有現成的）。
+        沒填的話回報只留在這支手機，對別人沒有預警作用。
+      </div>
+      <input type="text" id="hazUrl" placeholder="https://luleopard-hazards.你的帳號.workers.dev" autocomplete="off" spellcheck="false">
+      <div class="row"><div><label>自動接收附近回報</label><div class="hint">每 3 分鐘抓一次周邊 15 公里</div></div>
+        <div class="sw"><input type="checkbox" id="sHazAuto" checked><span></span></div></div>
+      <div class="row"><div><label>協助自動下架過期事件</label>
+        <div class="hint">經過事件點時，自動回報「有沒有比你原本的速度慢下來」。
+        沒慢下來代表東西可能已經排除，系統就會自動下架，不用等時間到。
+        <b>只送一個是／否，不送速度、不送座標、不送裝置代號。</b></div></div>
+        <div class="sw"><input type="checkbox" id="sProbe" checked><span></span></div></div>
+      <button class="btn wide" id="btnHazPull">立即取得附近回報</button>
+      <div class="hint" id="hazSyncStat"></div>
+    </div>
+
+    <div class="card">
+      <h3>🗂️ 目前的事件 <small id="hazCount"></small></h3>
+      <div id="hazList"></div>
+    </div>
+
+    <div class="card">
+      <h3>📷 測速點回報 <small>固定式 / 科技執法 / 臨檢</small></h3>
+      <div class="chips" id="repKind"></div>
+      <div class="row"><label>速限 (km/h)</label><input type="number" id="repLimit" value="50" style="width:92px" min="0" max="130" step="10"></div>
+      <input type="text" id="repNote" placeholder="例：路口新增科技執法">
+      <button class="btn wide" id="btnReport">在目前位置新增測速點</button>
+      <div id="repList" style="margin-top:10px"></div>
+      <div class="hint" id="repCount"></div>
+      <button class="btn wide sm" id="btnExportRep">匯出我的測速點回報 (GeoJSON)</button>
+    </div>
+  </div></section>
+
+  <!-- 資料 -->
+  <section class="view" id="v-data"><div class="pad">
+    <div class="card">
+      <h3>🛰️ 我的資料源 <small>合併好的全台點位</small></h3>
+      <div class="hint" style="margin-bottom:9px">
+        用 <code>build_speedcams.py</code> 把國道＋六都＋各縣合併後發布出來的網址。
+        設定一次，之後按一下就更新，不用再手動下載匯入。
+      </div>
+      <input type="text" id="feedUrl" placeholder="https://你的帳號.github.io/專案/data/speedcams.min.json" autocomplete="off" spellcheck="false">
+      <button class="btn wide primary" id="btnFeedUpdate">從資料源更新</button>
+      <div class="row"><div><label>開啟時自動更新</label><div class="hint">每天最多一次，失敗不影響離線使用</div></div>
+        <div class="sw"><input type="checkbox" id="sFeedAuto"><span></span></div></div>
+      <div class="hint" id="feedStat"></div>
+    </div>
+    <div class="card">
+      <h3>🗃️ 點位資料庫</h3>
+      <div class="row"><label>目前載入</label><b id="dbStat">—</b></div>
+      <button class="btn wide primary" id="btnImport">匯入檔案 (CSV / ZIP / GeoJSON)</button>
+      <input type="file" id="fileIn" accept=".csv,.zip,.json,.geojson,.txt" multiple class="hidden">
+      <div class="hint" style="margin-top:8px">
+        可一次選多個檔案，<b>來源會累加不會互相覆蓋</b>，重複座標自動去重。<br>
+        自動判讀 UTF-8 / Big5 編碼與各種欄位命名；<b>ZIP 會自動解壓</b>（國道那份就是 ZIP）。
+      </div>
+      <button class="btn wide" id="btnFetchGov">線上抓取（縣道版，常被 CORS 擋）</button>
+    </div>
+    <div class="card">
+      <h3>🗺️ 縣市覆蓋 <small>你的縣市有沒有資料</small></h3>
+      <div class="hint" style="margin-bottom:9px">
+        沒有任何單一政府資料源涵蓋全台灣。<b>下面是白名單 —— 沒列到的縣市就是完全沒有點位，
+        開在那裡不會有任何警示</b>，不是程式壞掉。補齊方式見上面的「我的資料源」或 README。
+      </div>
+      <div id="covList"></div>
+    </div>
+    <div class="card">
+      <h3>🛣️ 路網幾何 <small>讓前方清單沿著路彎過去</small></h3>
+      <div class="row"><label>目前狀態</label><b id="roadStat">未載入</b></div>
+      <div class="hint" style="margin-bottom:9px">
+        由 <code>etl/build_roadnet.py</code> 從 OpenStreetMap 產生。載入後：
+        前方測速點會<b>沿著道路</b>計算而不是用航向錐形猜（彎道不再漏列），
+        樁號推算也改用沿路距離，山區誤差大幅下降。<b>沒載入不影響其他功能。</b>
+      </div>
+      <input type="text" id="roadUrl" placeholder="https://你的帳號.github.io/專案/data/roadnet.min.json" autocomplete="off" spellcheck="false">
+      <button class="btn wide primary" id="btnRoadLoad">從網址載入路網</button>
+      <button class="btn wide" id="btnRoadFile">改用檔案匯入</button>
+      <input type="file" id="roadIn" accept=".json,.geojson" class="hidden">
+      <button class="btn wide sm danger" id="btnRoadClear">清除路網</button>
+      <div class="hint" id="roadMsg" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <h3>📦 已載入的來源 <small>可個別移除</small></h3>
+      <div id="packList"></div>
+      <button class="btn wide danger sm" id="btnClearImported">全部清除，還原內建資料</button>
+    </div>
+    <div class="card">
+      <h3>🔗 官方資料下載點</h3>
+      <div id="srcList"></div>
+    </div>
+    <div class="card">
+      <h3>🚦 即時路況來源 (TDX)</h3>
+      <div class="hint" style="margin-bottom:9px">TDX 需要免費註冊取得 Client ID / Secret。填入後即可在「路況」頁抓取即時事件。金鑰只存在這台裝置。</div>
+      <div class="row"><label>Client ID</label></div>
+      <input type="text" id="tdxId" placeholder="your-client-id" autocomplete="off">
+      <div class="row"><label>Client Secret</label></div>
+      <input type="password" id="tdxSecret" placeholder="your-client-secret" autocomplete="off">
+      <div class="row"><label>事件 API 路徑</label></div>
+      <input type="text" id="tdxPath">
+      <button class="btn wide primary" id="btnSaveTdx">儲存並測試連線</button>
+      <div class="hint" id="tdxStat" style="margin-top:8px"></div>
+    </div>
+  </div></section>
+
+  <!-- 設定 -->
+  <section class="view" id="v-set"><div class="pad">
+    <div class="card">
+      <h3>🔔 警示</h3>
+      <div class="row"><div><label>語音播報</label><div class="hint">使用系統中文語音朗讀警示</div></div>
+        <div class="sw"><input type="checkbox" id="sVoice" checked><span></span></div></div>
+      <div class="row"><div><label>提示音</label><div class="hint">語音不可用時仍會嗶聲</div></div>
+        <div class="sw"><input type="checkbox" id="sBeep" checked><span></span></div></div>
+      <div class="row"><div><label>震動</label><div class="hint">Android 支援，iOS Safari 不支援</div></div>
+        <div class="sw"><input type="checkbox" id="sVibe" checked><span></span></div></div>
+      <div class="row"><div><label>方向過濾</label><div class="hint">只提醒與行進方向相符的測速點，避免對向誤報</div></div>
+        <div class="sw"><input type="checkbox" id="sDir" checked><span></span></div></div>
+      <div class="row"><div><label>超速才警告</label><div class="hint">開啟後，車速低於速限時只做安靜提示</div></div>
+        <div class="sw"><input type="checkbox" id="sOnlyOver"><span></span></div></div>
+      <div class="row"><div><label>螢幕常亮</label><div class="hint" id="wakeHint">開啟網頁後就避免螢幕自動關閉</div></div>
+        <div class="sw"><input type="checkbox" id="sWake" checked><span></span></div></div>
+      <div class="row"><div><label>靜止自動省電</label><div class="hint">停車後降低定位頻率，開始行駛自動恢復</div></div>
+        <div class="sw"><input type="checkbox" id="sPower" checked><span></span></div></div>
+      <div class="row"><label>靜止多久後省電</label><span><b id="vPowerMin">5</b> 分鐘</span></div>
+      <input type="range" id="rPowerMin" min="2" max="30" step="1" style="width:100%">
+    </div>
+    <div class="card">
+      <h3>📏 警示距離 <small>依車速自動延伸</small></h3>
+      <div class="row"><label>預告</label><span><b id="vT1">600</b> m</span></div>
+      <input type="range" id="rT1" min="200" max="1500" step="50" style="width:100%">
+      <div class="row"><label>注意</label><span><b id="vT2">300</b> m</span></div>
+      <input type="range" id="rT2" min="100" max="800" step="25" style="width:100%">
+      <div class="row"><label>警告</label><span><b id="vT3">120</b> m</span></div>
+      <input type="range" id="rT3" min="50" max="400" step="10" style="width:100%">
+      <div class="hint" style="margin-top:8px">實際觸發距離取「設定值」與「車速 × 反應秒數」的較大者，時速越高越早提醒。</div>
+    </div>
+    <div class="card">
+      <h3>🧪 模擬行車 <small>沒開車也能驗證警示</small></h3>
+      <div class="row"><label>模擬時速</label><span><b id="vSimSpd">70</b> km/h</span></div>
+      <input type="range" id="rSimSpd" min="20" max="120" step="5" value="70" style="width:100%">
+      <button class="btn wide gold" id="btnSim">開始模擬行車</button>
+      <div class="hint" style="margin-top:8px">沿著資料庫中最密集的一段路自動行駛，會實際觸發語音與警示。</div>
+    </div>
+    <div class="card">
+      <h3>ℹ️ 關於</h3>
+      <div class="hint" id="aboutBox" style="line-height:1.9">
+        <b>鹿豹</b> · 台灣道路測速預報 · <span id="setVer">公測版 v1.5</span><br>
+        著作權所有 © 2026 winnerich168．保留所有權利<br>
+        <b style="color:var(--warn)">公測期間資料仍在補齊</b>，各縣市覆蓋狀況請看「資料」頁。
+        <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line)">
+          <b>資料出處</b><br>
+          <b>測速點位</b>：內政部警政署國道公路警察局「國道公路固定式測速照相地點」、
+          內政部警政署「測速執法設置點」及各縣市政府警察局公布之測速照相地點，
+          依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第1版</a>使用。<br>
+          <b>地圖與路網</b>：© OpenStreetMap contributors，依
+          <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> 使用；
+          本 App 產出的路網衍生資料庫亦以 ODbL 授權釋出。<br>
+          <b>路況事件</b>：交通部 TDX 運輸資料流通服務（需自行申請金鑰）。<br>
+          <b>程式庫</b>：Leaflet 1.9.4（BSD-2-Clause）、fflate 0.8.2（MIT）。<br>
+          <span style="opacity:.8">資料由各機關提供，本工具不保證其正確性、完整性或即時性。</span>
+        </div>
+        <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line)">
+          <b>隱私</b><br>
+          不需註冊、不蒐集帳號、<b>不上傳照片</b>（只在本機讀取 EXIF 座標）、<b>不記錄行車軌跡</b>。
+          設定與回報存在這台裝置上。
+        </div>
+        <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line)">
+          <b style="color:var(--warn)">本工具僅供行車安全提醒，請以現場標誌與實際路況為準。
+          行進中請勿操作手機，並請遵守道路交通法規。</b>
+        </div>
+      </div>
+      <button class="btn wide sm" id="btnReset">重設所有設定與資料</button>
+    </div>
+  </div></section>
+</div>
+
+<!-- ══════════ TABS ══════════ -->
+<nav id="tabs">
+  <button data-v="map" class="active"><span class="ic">🗺️</span>地圖</button>
+  <button data-v="trip"><span class="ic">🚗</span>旅程</button>
+  <button data-v="traffic"><span class="ic">📻</span>路況</button>
+  <button data-v="report"><span class="ic">📍</span>回報</button>
+  <button data-v="data"><span class="ic">🗃️</span>資料</button>
+  <button data-v="set"><span class="ic">⚙️</span>設定</button>
+</nav>
+
+<!-- ══════════ GATE ══════════ -->
+<div id="gate">
+  <h1>鹿 豹</h1>
+  <div class="gatever"><span class="betabadge" id="gateBadge">公測版</span><span id="gateVer">—</span></div>
+  <div class="sub">台灣道路測速照相預報<br>結合 GPS 定位、路況播報與使用者回報</div>
+  <div class="betabox">
+    <b>這是公測版，請不要完全依賴它</b>
+    測速點資料仍在逐縣市補齊中，<b>你所在的縣市可能一個點都沒有</b>（開啟後可在「資料 → 縣市覆蓋」查看）。
+    警示也可能因為定位品質而延遲或漏報。
+  </div>
+  <button class="btn primary" id="btnStart" style="padding:15px 34px;font-size:17px">開始導航警示</button>
+  <button class="btn" id="btnSkip" style="margin-top:12px">先不開 GPS，只看地圖</button>
+  <div class="warn">按下後會請求定位權限並解鎖語音播報。<br>本工具僅供安全提醒，<b>行車請以現場標誌為準</b>，切勿在行進中操作手機。</div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<!-- fflate 0.8.2 (MIT) — 內嵌，讓 ZIP 匯入不需連網 -->
+<script>
+!function(f){typeof module!='undefined'&&typeof exports=='object'?module.exports=f():typeof define!='undefined'&&define.amd?define(f):(typeof self!='undefined'?self:this).fflate=f()}(function(){var _e={};"use strict";var t=(typeof module!='undefined'&&typeof exports=='object'?function(_f){"use strict";var e,t=";var __w=require('worker_threads');__w.parentPort.on('message',function(m){onmessage({data:m})}),postMessage=function(m,t){__w.parentPort.postMessage(m,t)},close=process.exit;self=global";try{e=require("worker_threads").Worker}catch(e){}exports.default=e?function(r,n,o,a,s){var u=!1,i=new e(r+t,{eval:!0}).on("error",(function(e){return s(e,null)})).on("message",(function(e){return s(null,e)})).on("exit",(function(e){e&&!u&&s(Error("exited with code "+e),null)}));return i.postMessage(o,a),i.terminate=function(){return u=!0,e.prototype.terminate.call(i)},i}:function(e,t,r,n,o){setImmediate((function(){return o(Error("async operations unsupported - update to Node 12+ (or Node 10-11 with the --experimental-worker CLI flag)"),null)}));var a=function(){};return{terminate:a,postMessage:a}};return _f}:function(_f){"use strict";var e={};_f.default=function(r,t,s,a,n){var o=new Worker(e[t]||(e[t]=URL.createObjectURL(new Blob([r+';addEventListener("error",function(e){e=e.error;postMessage({$e$:[e.message,e.code,e.stack]})})'],{type:"text/javascript"}))));return o.onmessage=function(e){var r=e.data,t=r.$e$;if(t){var s=Error(t[0]);s.code=t[1],s.stack=t[2],n(s,null)}else n(null,r)},o.postMessage(s,a),o};return _f})({}),n=Uint8Array,r=Uint16Array,e=Int32Array,i=new n([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),o=new n([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),s=new n([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),a=function(t,n){for(var i=new r(31),o=0;o<31;++o)i[o]=n+=1<<t[o-1];var s=new e(i[30]);for(o=1;o<30;++o)for(var a=i[o];a<i[o+1];++a)s[a]=a-i[o]<<5|o;return{b:i,r:s}},u=a(i,2),h=u.b,f=u.r;h[28]=258,f[258]=28;for(var l=a(o,0),c=l.b,p=l.r,v=new r(32768),d=0;d<32768;++d){var g=(43690&d)>>1|(21845&d)<<1;v[d]=((65280&(g=(61680&(g=(52428&g)>>2|(13107&g)<<2))>>4|(3855&g)<<4))>>8|(255&g)<<8)>>1}var y=function(t,n,e){for(var i=t.length,o=0,s=new r(n);o<i;++o)t[o]&&++s[t[o]-1];var a,u=new r(n);for(o=1;o<n;++o)u[o]=u[o-1]+s[o-1]<<1;if(e){a=new r(1<<n);var h=15-n;for(o=0;o<i;++o)if(t[o])for(var f=o<<4|t[o],l=n-t[o],c=u[t[o]-1]++<<l,p=c|(1<<l)-1;c<=p;++c)a[v[c]>>h]=f}else for(a=new r(i),o=0;o<i;++o)t[o]&&(a[o]=v[u[t[o]-1]++]>>15-t[o]);return a},m=new n(288);for(d=0;d<144;++d)m[d]=8;for(d=144;d<256;++d)m[d]=9;for(d=256;d<280;++d)m[d]=7;for(d=280;d<288;++d)m[d]=8;var b=new n(32);for(d=0;d<32;++d)b[d]=5;var w=y(m,9,0),x=y(m,9,1),z=y(b,5,0),k=y(b,5,1),M=function(t){for(var n=t[0],r=1;r<t.length;++r)t[r]>n&&(n=t[r]);return n},S=function(t,n,r){var e=n/8|0;return(t[e]|t[e+1]<<8)>>(7&n)&r},A=function(t,n){var r=n/8|0;return(t[r]|t[r+1]<<8|t[r+2]<<16)>>(7&n)},T=function(t){return(t+7)/8|0},D=function(t,r,e){return(null==r||r<0)&&(r=0),(null==e||e>t.length)&&(e=t.length),new n(t.subarray(r,e))};_e.FlateErrorCode={UnexpectedEOF:0,InvalidBlockType:1,InvalidLengthLiteral:2,InvalidDistance:3,StreamFinished:4,NoStreamHandler:5,InvalidHeader:6,NoCallback:7,InvalidUTF8:8,ExtraFieldTooLong:9,InvalidDate:10,FilenameTooLong:11,StreamFinishing:12,InvalidZipData:13,UnknownCompressionMethod:14};var C=["unexpected EOF","invalid block type","invalid length/literal","invalid distance","stream finished","no stream handler",,"no callback","invalid UTF-8 data","extra field too long","date not in range 1980-2099","filename too long","stream finishing","invalid zip data"],I=function(t,n,r){var e=Error(n||C[t]);if(e.code=t,Error.captureStackTrace&&Error.captureStackTrace(e,I),!r)throw e;return e},U=function(t,r,e,a){var u=t.length,f=a?a.length:0;if(!u||r.f&&!r.l)return e||new n(0);var l=!e,p=l||2!=r.i,v=r.i;l&&(e=new n(3*u));var d=function(t){var r=e.length;if(t>r){var i=new n(Math.max(2*r,t));i.set(e),e=i}},g=r.f||0,m=r.p||0,b=r.b||0,w=r.l,z=r.d,C=r.m,U=r.n,F=8*u;do{if(!w){g=S(t,m,1);var E=S(t,m+1,3);if(m+=3,!E){var Z=t[(J=T(m)+4)-4]|t[J-3]<<8,q=J+Z;if(q>u){v&&I(0);break}p&&d(b+Z),e.set(t.subarray(J,q),b),r.b=b+=Z,r.p=m=8*q,r.f=g;continue}if(1==E)w=x,z=k,C=9,U=5;else if(2==E){var O=S(t,m,31)+257,G=S(t,m+10,15)+4,L=O+S(t,m+5,31)+1;m+=14;for(var H=new n(L),j=new n(19),N=0;N<G;++N)j[s[N]]=S(t,m+3*N,7);m+=3*G;var P=M(j),B=(1<<P)-1,Y=y(j,P,1);for(N=0;N<L;){var J,K=Y[S(t,m,B)];if(m+=15&K,(J=K>>4)<16)H[N++]=J;else{var Q=0,R=0;for(16==J?(R=3+S(t,m,3),m+=2,Q=H[N-1]):17==J?(R=3+S(t,m,7),m+=3):18==J&&(R=11+S(t,m,127),m+=7);R--;)H[N++]=Q}}var V=H.subarray(0,O),W=H.subarray(O);C=M(V),U=M(W),w=y(V,C,1),z=y(W,U,1)}else I(1);if(m>F){v&&I(0);break}}p&&d(b+131072);for(var X=(1<<C)-1,$=(1<<U)-1,_=m;;_=m){var tt=(Q=w[A(t,m)&X])>>4;if((m+=15&Q)>F){v&&I(0);break}if(Q||I(2),tt<256)e[b++]=tt;else{if(256==tt){_=m,w=null;break}var nt=tt-254;tt>264&&(nt=S(t,m,(1<<(it=i[N=tt-257]))-1)+h[N],m+=it);var rt=z[A(t,m)&$],et=rt>>4;if(rt||I(3),m+=15&rt,W=c[et],et>3){var it=o[et];W+=A(t,m)&(1<<it)-1,m+=it}if(m>F){v&&I(0);break}p&&d(b+131072);var ot=b+nt;if(b<W){var st=f-W,at=Math.min(W,ot);for(st+b<0&&I(3);b<at;++b)e[b]=a[st+b]}for(;b<ot;++b)e[b]=e[b-W]}}r.l=w,r.p=_,r.b=b,r.f=g,w&&(g=1,r.m=C,r.d=z,r.n=U)}while(!g);return b!=e.length&&l?D(e,0,b):e.subarray(0,b)},F=function(t,n,r){var e=n/8|0;t[e]|=r<<=7&n,t[e+1]|=r>>8},E=function(t,n,r){var e=n/8|0;t[e]|=r<<=7&n,t[e+1]|=r>>8,t[e+2]|=r>>16},Z=function(t,e){for(var i=[],o=0;o<t.length;++o)t[o]&&i.push({s:o,f:t[o]});var s=i.length,a=i.slice();if(!s)return{t:N,l:0};if(1==s){var u=new n(i[0].s+1);return u[i[0].s]=1,{t:u,l:1}}i.sort((function(t,n){return t.f-n.f})),i.push({s:-1,f:25001});var h=i[0],f=i[1],l=0,c=1,p=2;for(i[0]={s:-1,f:h.f+f.f,l:h,r:f};c!=s-1;)h=i[i[l].f<i[p].f?l++:p++],f=i[l!=c&&i[l].f<i[p].f?l++:p++],i[c++]={s:-1,f:h.f+f.f,l:h,r:f};var v=a[0].s;for(o=1;o<s;++o)a[o].s>v&&(v=a[o].s);var d=new r(v+1),g=q(i[c-1],d,0);if(g>e){o=0;var y=0,m=g-e,b=1<<m;for(a.sort((function(t,n){return d[n.s]-d[t.s]||t.f-n.f}));o<s;++o){var w=a[o].s;if(!(d[w]>e))break;y+=b-(1<<g-d[w]),d[w]=e}for(y>>=m;y>0;){var x=a[o].s;d[x]<e?y-=1<<e-d[x]++-1:++o}for(;o>=0&&y;--o){var z=a[o].s;d[z]==e&&(--d[z],++y)}g=e}return{t:new n(d),l:g}},q=function(t,n,r){return-1==t.s?Math.max(q(t.l,n,r+1),q(t.r,n,r+1)):n[t.s]=r},O=function(t){for(var n=t.length;n&&!t[--n];);for(var e=new r(++n),i=0,o=t[0],s=1,a=function(t){e[i++]=t},u=1;u<=n;++u)if(t[u]==o&&u!=n)++s;else{if(!o&&s>2){for(;s>138;s-=138)a(32754);s>2&&(a(s>10?s-11<<5|28690:s-3<<5|12305),s=0)}else if(s>3){for(a(o),--s;s>6;s-=6)a(8304);s>2&&(a(s-3<<5|8208),s=0)}for(;s--;)a(o);s=1,o=t[u]}return{c:e.subarray(0,i),n:n}},G=function(t,n){for(var r=0,e=0;e<n.length;++e)r+=t[e]*n[e];return r},L=function(t,n,r){var e=r.length,i=T(n+2);t[i]=255&e,t[i+1]=e>>8,t[i+2]=255^t[i],t[i+3]=255^t[i+1];for(var o=0;o<e;++o)t[i+o+4]=r[o];return 8*(i+4+e)},H=function(t,n,e,a,u,h,f,l,c,p,v){F(n,v++,e),++u[256];for(var d=Z(u,15),g=d.t,x=d.l,k=Z(h,15),M=k.t,S=k.l,A=O(g),T=A.c,D=A.n,C=O(M),I=C.c,U=C.n,q=new r(19),H=0;H<T.length;++H)++q[31&T[H]];for(H=0;H<I.length;++H)++q[31&I[H]];for(var j=Z(q,7),N=j.t,P=j.l,B=19;B>4&&!N[s[B-1]];--B);var Y,J,K,Q,R=p+5<<3,V=G(u,m)+G(h,b)+f,W=G(u,g)+G(h,M)+f+14+3*B+G(q,N)+2*q[16]+3*q[17]+7*q[18];if(c>=0&&R<=V&&R<=W)return L(n,v,t.subarray(c,c+p));if(F(n,v,1+(W<V)),v+=2,W<V){Y=y(g,x,0),J=g,K=y(M,S,0),Q=M;var X=y(N,P,0);for(F(n,v,D-257),F(n,v+5,U-1),F(n,v+10,B-4),v+=14,H=0;H<B;++H)F(n,v+3*H,N[s[H]]);v+=3*B;for(var $=[T,I],_=0;_<2;++_){var tt=$[_];for(H=0;H<tt.length;++H)F(n,v,X[rt=31&tt[H]]),v+=N[rt],rt>15&&(F(n,v,tt[H]>>5&127),v+=tt[H]>>12)}}else Y=w,J=m,K=z,Q=b;for(H=0;H<l;++H){var nt=a[H];if(nt>255){var rt;E(n,v,Y[257+(rt=nt>>18&31)]),v+=J[rt+257],rt>7&&(F(n,v,nt>>23&31),v+=i[rt]);var et=31&nt;E(n,v,K[et]),v+=Q[et],et>3&&(E(n,v,nt>>5&8191),v+=o[et])}else E(n,v,Y[nt]),v+=J[nt]}return E(n,v,Y[256]),v+J[256]},j=new e([65540,131080,131088,131104,262176,1048704,1048832,2114560,2117632]),N=new n(0),P=function(t,s,a,u,h,l){var c=l.z||t.length,v=new n(u+c+5*(1+Math.ceil(c/7e3))+h),d=v.subarray(u,v.length-h),g=l.l,y=7&(l.r||0);if(s){y&&(d[0]=l.r>>3);for(var m=j[s-1],b=m>>13,w=8191&m,x=(1<<a)-1,z=l.p||new r(32768),k=l.h||new r(x+1),M=Math.ceil(a/3),S=2*M,A=function(n){return(t[n]^t[n+1]<<M^t[n+2]<<S)&x},C=new e(25e3),I=new r(288),U=new r(32),F=0,E=0,Z=l.i||0,q=0,O=l.w||0,G=0;Z+2<c;++Z){var N=A(Z),P=32767&Z,B=k[N];if(z[P]=B,k[N]=P,O<=Z){var Y=c-Z;if((F>7e3||q>24576)&&(Y>423||!g)){y=H(t,d,0,C,I,U,E,q,G,Z-G,y),q=F=E=0,G=Z;for(var J=0;J<286;++J)I[J]=0;for(J=0;J<30;++J)U[J]=0}var K=2,Q=0,R=w,V=P-B&32767;if(Y>2&&N==A(Z-V))for(var W=Math.min(b,Y)-1,X=Math.min(32767,Z),$=Math.min(258,Y);V<=X&&--R&&P!=B;){if(t[Z+K]==t[Z+K-V]){for(var _=0;_<$&&t[Z+_]==t[Z+_-V];++_);if(_>K){if(K=_,Q=V,_>W)break;var tt=Math.min(V,_-2),nt=0;for(J=0;J<tt;++J){var rt=Z-V+J&32767,et=rt-z[rt]&32767;et>nt&&(nt=et,B=rt)}}}V+=(P=B)-(B=z[P])&32767}if(Q){C[q++]=268435456|f[K]<<18|p[Q];var it=31&f[K],ot=31&p[Q];E+=i[it]+o[ot],++I[257+it],++U[ot],O=Z+K,++F}else C[q++]=t[Z],++I[t[Z]]}}for(Z=Math.max(Z,O);Z<c;++Z)C[q++]=t[Z],++I[t[Z]];y=H(t,d,g,C,I,U,E,q,G,Z-G,y),g||(l.r=7&y|d[y/8|0]<<3,y-=7,l.h=k,l.p=z,l.i=Z,l.w=O)}else{for(Z=l.w||0;Z<c+g;Z+=65535){var st=Z+65535;st>=c&&(d[y/8|0]=g,st=c),y=L(d,y+1,t.subarray(Z,st))}l.i=c}return D(v,0,u+T(y)+h)},B=function(){for(var t=new Int32Array(256),n=0;n<256;++n){for(var r=n,e=9;--e;)r=(1&r&&-306674912)^r>>>1;t[n]=r}return t}(),Y=function(){var t=-1;return{p:function(n){for(var r=t,e=0;e<n.length;++e)r=B[255&r^n[e]]^r>>>8;t=r},d:function(){return~t}}},J=function(){var t=1,n=0;return{p:function(r){for(var e=t,i=n,o=0|r.length,s=0;s!=o;){for(var a=Math.min(s+2655,o);s<a;++s)i+=e+=r[s];e=(65535&e)+15*(e>>16),i=(65535&i)+15*(i>>16)}t=e,n=i},d:function(){return(255&(t%=65521))<<24|(65280&t)<<8|(255&(n%=65521))<<8|n>>8}}},K=function(t,r,e,i,o){if(!o&&(o={l:1},r.dictionary)){var s=r.dictionary.subarray(-32768),a=new n(s.length+t.length);a.set(s),a.set(t,s.length),t=a,o.w=s.length}return P(t,null==r.level?6:r.level,null==r.mem?o.l?Math.ceil(1.5*Math.max(8,Math.min(13,Math.log(t.length)))):20:12+r.mem,e,i,o)},Q=function(t,n){var r={};for(var e in t)r[e]=t[e];for(var e in n)r[e]=n[e];return r},R=function(t,n,r){for(var e=t(),i=""+t,o=i.slice(i.indexOf("[")+1,i.lastIndexOf("]")).replace(/\s+/g,"").split(","),s=0;s<e.length;++s){var a=e[s],u=o[s];if("function"==typeof a){n+=";"+u+"=";var h=""+a;if(a.prototype)if(-1!=h.indexOf("[native code]")){var f=h.indexOf(" ",8)+1;n+=h.slice(f,h.indexOf("(",f))}else for(var l in n+=h,a.prototype)n+=";"+u+".prototype."+l+"="+a.prototype[l];else n+=h}else r[u]=a}return n},V=[],W=function(t){var n=[];for(var r in t)t[r].buffer&&n.push((t[r]=new t[r].constructor(t[r])).buffer);return n},X=function(n,r,e,i){if(!V[e]){for(var o="",s={},a=n.length-1,u=0;u<a;++u)o=R(n[u],o,s);V[e]={c:R(n[a],o,s),e:s}}var h=Q({},V[e].e);return(0,t.default)(V[e].c+";onmessage=function(e){for(var k in e.data)self[k]=e.data[k];onmessage="+r+"}",e,h,W(h),i)},$=function(){return[n,r,e,i,o,s,h,c,x,k,v,C,y,M,S,A,T,D,I,U,Tt,it,ot]},_=function(){return[n,r,e,i,o,s,f,p,w,m,z,b,v,j,N,y,F,E,Z,q,O,G,L,H,T,D,P,K,kt,it]},tt=function(){return[pt,gt,ct,Y,B]},nt=function(){return[vt,dt]},rt=function(){return[yt,ct,J]},et=function(){return[mt]},it=function(t){return postMessage(t,[t.buffer])},ot=function(t){return t&&{out:t.size&&new n(t.size),dictionary:t.dictionary}},st=function(t,n,r,e,i,o){var s=X(r,e,i,(function(t,n){s.terminate(),o(t,n)}));return s.postMessage([t,n],n.consume?[t.buffer]:[]),function(){s.terminate()}},at=function(t){return t.ondata=function(t,n){return postMessage([t,n],[t.buffer])},function(n){n.data.length?(t.push(n.data[0],n.data[1]),postMessage([n.data[0].length])):t.flush()}},ut=function(t,n,r,e,i,o,s){var a,u=X(t,e,i,(function(t,r){t?(u.terminate(),n.ondata.call(n,t)):Array.isArray(r)?1==r.length?(n.queuedSize-=r[0],n.ondrain&&n.ondrain(r[0])):(r[1]&&u.terminate(),n.ondata.call(n,t,r[0],r[1])):s(r)}));u.postMessage(r),n.queuedSize=0,n.push=function(t,r){n.ondata||I(5),a&&n.ondata(I(4,0,1),null,!!r),n.queuedSize+=t.length,u.postMessage([t,a=r],[t.buffer])},n.terminate=function(){u.terminate()},o&&(n.flush=function(){u.postMessage([])})},ht=function(t,n){return t[n]|t[n+1]<<8},ft=function(t,n){return(t[n]|t[n+1]<<8|t[n+2]<<16|t[n+3]<<24)>>>0},lt=function(t,n){return ft(t,n)+4294967296*ft(t,n+4)},ct=function(t,n,r){for(;r;++n)t[n]=r,r>>>=8},pt=function(t,n){var r=n.filename;if(t[0]=31,t[1]=139,t[2]=8,t[8]=n.level<2?4:9==n.level?2:0,t[9]=3,0!=n.mtime&&ct(t,4,Math.floor(new Date(n.mtime||Date.now())/1e3)),r){t[3]=8;for(var e=0;e<=r.length;++e)t[e+10]=r.charCodeAt(e)}},vt=function(t){31==t[0]&&139==t[1]&&8==t[2]||I(6,"invalid gzip data");var n=t[3],r=10;4&n&&(r+=2+(t[10]|t[11]<<8));for(var e=(n>>3&1)+(n>>4&1);e>0;e-=!t[r++]);return r+(2&n)},dt=function(t){var n=t.length;return(t[n-4]|t[n-3]<<8|t[n-2]<<16|t[n-1]<<24)>>>0},gt=function(t){return 10+(t.filename?t.filename.length+1:0)},yt=function(t,n){var r=n.level,e=0==r?0:r<6?1:9==r?3:2;if(t[0]=120,t[1]=e<<6|(n.dictionary&&32),t[1]|=31-(t[0]<<8|t[1])%31,n.dictionary){var i=J();i.p(n.dictionary),ct(t,2,i.d())}},mt=function(t,n){return(8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31)&&I(6,"invalid zlib data"),(t[1]>>5&1)==+!n&&I(6,"invalid zlib data: "+(32&t[1]?"need":"unexpected")+" dictionary"),2+(t[1]>>3&4)};function bt(t,n){return"function"==typeof t&&(n=t,t={}),this.ondata=n,t}var wt=function(){function t(t,r){if("function"==typeof t&&(r=t,t={}),this.ondata=r,this.o=t||{},this.s={l:0,i:32768,w:32768,z:32768},this.b=new n(98304),this.o.dictionary){var e=this.o.dictionary.subarray(-32768);this.b.set(e,32768-e.length),this.s.i=32768-e.length}}return t.prototype.p=function(t,n){this.ondata(K(t,this.o,0,0,this.s),n)},t.prototype.push=function(t,r){this.ondata||I(5),this.s.l&&I(4);var e=t.length+this.s.z;if(e>this.b.length){if(e>2*this.b.length-32768){var i=new n(-32768&e);i.set(this.b.subarray(0,this.s.z)),this.b=i}var o=this.b.length-this.s.z;this.b.set(t.subarray(0,o),this.s.z),this.s.z=this.b.length,this.p(this.b,!1),this.b.set(this.b.subarray(-32768)),this.b.set(t.subarray(o),32768),this.s.z=t.length-o+32768,this.s.i=32766,this.s.w=32768}else this.b.set(t,this.s.z),this.s.z+=t.length;this.s.l=1&r,(this.s.z>this.s.w+8191||r)&&(this.p(this.b,r||!1),this.s.w=this.s.i,this.s.i-=2)},t.prototype.flush=function(){this.ondata||I(5),this.s.l&&I(4),this.p(this.b,!1),this.s.w=this.s.i,this.s.i-=2},t}();_e.Deflate=wt;var xt=function(){return function(t,n){ut([_,function(){return[at,wt]}],this,bt.call(this,t,n),(function(t){var n=new wt(t.data);onmessage=at(n)}),6,1)}}();function zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_],(function(t){return it(kt(t.data[0],t.data[1]))}),0,r)}function kt(t,n){return K(t,n||{},0,0)}_e.AsyncDeflate=xt,_e.deflate=zt,_e.deflateSync=kt;var Mt=function(){function t(t,r){"function"==typeof t&&(r=t,t={}),this.ondata=r;var e=t&&t.dictionary&&t.dictionary.subarray(-32768);this.s={i:0,b:e?e.length:0},this.o=new n(32768),this.p=new n(0),e&&this.o.set(e)}return t.prototype.e=function(t){if(this.ondata||I(5),this.d&&I(4),this.p.length){if(t.length){var r=new n(this.p.length+t.length);r.set(this.p),r.set(t,this.p.length),this.p=r}}else this.p=t},t.prototype.c=function(t){this.s.i=+(this.d=t||!1);var n=this.s.b,r=U(this.p,this.s,this.o);this.ondata(D(r,n,this.s.b),this.d),this.o=D(r,this.s.b-32768),this.s.b=this.o.length,this.p=D(this.p,this.s.p/8|0),this.s.p&=7},t.prototype.push=function(t,n){this.e(t),this.c(n)},t}();_e.Inflate=Mt;var St=function(){return function(t,n){ut([$,function(){return[at,Mt]}],this,bt.call(this,t,n),(function(t){var n=new Mt(t.data);onmessage=at(n)}),7,0)}}();function At(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$],(function(t){return it(Tt(t.data[0],ot(t.data[1])))}),1,r)}function Tt(t,n){return U(t,{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncInflate=St,_e.inflate=At,_e.inflateSync=Tt;var Dt=function(){function t(t,n){this.c=Y(),this.l=0,this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),this.l+=t.length,wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=K(t,this.o,this.v&&gt(this.o),n&&8,this.s);this.v&&(pt(r,this.o),this.v=0),n&&(ct(r,r.length-8,this.c.d()),ct(r,r.length-4,this.l)),this.ondata(r,n)},t.prototype.flush=function(){wt.prototype.flush.call(this)},t}();_e.Gzip=Dt,_e.Compress=Dt;var Ct=function(){return function(t,n){ut([_,tt,function(){return[at,wt,Dt]}],this,bt.call(this,t,n),(function(t){var n=new Dt(t.data);onmessage=at(n)}),8,1)}}();function It(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,tt,function(){return[Ut]}],(function(t){return it(Ut(t.data[0],t.data[1]))}),2,r)}function Ut(t,n){n||(n={});var r=Y(),e=t.length;r.p(t);var i=K(t,n,gt(n),8),o=i.length;return pt(i,n),ct(i,o-8,r.d()),ct(i,o-4,e),i}_e.AsyncGzip=Ct,_e.AsyncCompress=Ct,_e.gzip=It,_e.compress=It,_e.gzipSync=Ut,_e.compressSync=Ut;var Ft=function(){function t(t,n){this.v=1,this.r=0,Mt.call(this,t,n)}return t.prototype.push=function(t,r){if(Mt.prototype.e.call(this,t),this.r+=t.length,this.v){var e=this.p.subarray(this.v-1),i=e.length>3?vt(e):4;if(i>e.length){if(!r)return}else this.v>1&&this.onmember&&this.onmember(this.r-e.length);this.p=e.subarray(i),this.v=0}Mt.prototype.c.call(this,r),!this.s.f||this.s.l||r||(this.v=T(this.s.p)+9,this.s={i:0},this.o=new n(0),this.push(new n(0),r))},t}();_e.Gunzip=Ft;var Et=function(){return function(t,n){var r=this;ut([$,nt,function(){return[at,Mt,Ft]}],this,bt.call(this,t,n),(function(t){var n=new Ft(t.data);n.onmember=function(t){return postMessage(t)},onmessage=at(n)}),9,0,(function(t){return r.onmember&&r.onmember(t)}))}}();function Zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,nt,function(){return[qt]}],(function(t){return it(qt(t.data[0],t.data[1]))}),3,r)}function qt(t,r){var e=vt(t);return e+8>t.length&&I(6,"invalid gzip data"),U(t.subarray(e,-8),{i:2},r&&r.out||new n(dt(t)),r&&r.dictionary)}_e.AsyncGunzip=Et,_e.gunzip=Zt,_e.gunzipSync=qt;var Ot=function(){function t(t,n){this.c=J(),this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=K(t,this.o,this.v&&(this.o.dictionary?6:2),n&&4,this.s);this.v&&(yt(r,this.o),this.v=0),n&&ct(r,r.length-4,this.c.d()),this.ondata(r,n)},t.prototype.flush=function(){wt.prototype.flush.call(this)},t}();_e.Zlib=Ot;var Gt=function(){return function(t,n){ut([_,rt,function(){return[at,wt,Ot]}],this,bt.call(this,t,n),(function(t){var n=new Ot(t.data);onmessage=at(n)}),10,1)}}();function Lt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,rt,function(){return[Ht]}],(function(t){return it(Ht(t.data[0],t.data[1]))}),4,r)}function Ht(t,n){n||(n={});var r=J();r.p(t);var e=K(t,n,n.dictionary?6:2,4);return yt(e,n),ct(e,e.length-4,r.d()),e}_e.AsyncZlib=Gt,_e.zlib=Lt,_e.zlibSync=Ht;var jt=function(){function t(t,n){Mt.call(this,t,n),this.v=t&&t.dictionary?2:1}return t.prototype.push=function(t,n){if(Mt.prototype.e.call(this,t),this.v){if(this.p.length<6&&!n)return;this.p=this.p.subarray(mt(this.p,this.v-1)),this.v=0}n&&(this.p.length<4&&I(6,"invalid zlib data"),this.p=this.p.subarray(0,-4)),Mt.prototype.c.call(this,n)},t}();_e.Unzlib=jt;var Nt=function(){return function(t,n){ut([$,et,function(){return[at,Mt,jt]}],this,bt.call(this,t,n),(function(t){var n=new jt(t.data);onmessage=at(n)}),11,0)}}();function Pt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,et,function(){return[Bt]}],(function(t){return it(Bt(t.data[0],ot(t.data[1])))}),5,r)}function Bt(t,n){return U(t.subarray(mt(t,n&&n.dictionary),-4),{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncUnzlib=Nt,_e.unzlib=Pt,_e.unzlibSync=Bt;var Yt=function(){function t(t,n){this.o=bt.call(this,t,n)||{},this.G=Ft,this.I=Mt,this.Z=jt}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r){t.ondata(n,r)}},t.prototype.push=function(t,r){if(this.ondata||I(5),this.s)this.s.push(t,r);else{if(this.p&&this.p.length){var e=new n(this.p.length+t.length);e.set(this.p),e.set(t,this.p.length)}else this.p=t;this.p.length>2&&(this.s=31==this.p[0]&&139==this.p[1]&&8==this.p[2]?new this.G(this.o):8!=(15&this.p[0])||this.p[0]>>4>7||(this.p[0]<<8|this.p[1])%31?new this.I(this.o):new this.Z(this.o),this.i(),this.s.push(this.p,r),this.p=null)}},t}();_e.Decompress=Yt;var Jt=function(){function t(t,n){Yt.call(this,t,n),this.queuedSize=0,this.G=Et,this.I=St,this.Z=Nt}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r,e){t.ondata(n,r,e)},this.s.ondrain=function(n){t.queuedSize-=n,t.ondrain&&t.ondrain(n)}},t.prototype.push=function(t,n){this.queuedSize+=t.length,Yt.prototype.push.call(this,t,n)},t}();function Kt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),31==t[0]&&139==t[1]&&8==t[2]?Zt(t,n,r):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?At(t,n,r):Pt(t,n,r)}function Qt(t,n){return 31==t[0]&&139==t[1]&&8==t[2]?qt(t,n):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?Tt(t,n):Bt(t,n)}_e.AsyncDecompress=Jt,_e.decompress=Kt,_e.decompressSync=Qt;var Rt=function(t,r,e,i){for(var o in t){var s=t[o],a=r+o,u=i;Array.isArray(s)&&(u=Q(i,s[1]),s=s[0]),s instanceof n?e[a]=[s,u]:(e[a+="/"]=[new n(0),u],Rt(s,a,e,i))}},Vt="undefined"!=typeof TextEncoder&&new TextEncoder,Wt="undefined"!=typeof TextDecoder&&new TextDecoder,Xt=0;try{Wt.decode(N,{stream:!0}),Xt=1}catch(t){}var $t=function(t){for(var n="",r=0;;){var e=t[r++],i=(e>127)+(e>223)+(e>239);if(r+i>t.length)return{s:n,r:D(t,r-1)};i?3==i?(e=((15&e)<<18|(63&t[r++])<<12|(63&t[r++])<<6|63&t[r++])-65536,n+=String.fromCharCode(55296|e>>10,56320|1023&e)):n+=String.fromCharCode(1&i?(31&e)<<6|63&t[r++]:(15&e)<<12|(63&t[r++])<<6|63&t[r++]):n+=String.fromCharCode(e)}},_t=function(){function t(t){this.ondata=t,Xt?this.t=new TextDecoder:this.p=N}return t.prototype.push=function(t,r){if(this.ondata||I(5),r=!!r,this.t)return this.ondata(this.t.decode(t,{stream:!0}),r),void(r&&(this.t.decode().length&&I(8),this.t=null));this.p||I(4);var e=new n(this.p.length+t.length);e.set(this.p),e.set(t,this.p.length);var i=$t(e),o=i.s,s=i.r;r?(s.length&&I(8),this.p=null):this.p=s,this.ondata(o,r)},t}();_e.DecodeUTF8=_t;var tn=function(){function t(t){this.ondata=t}return t.prototype.push=function(t,n){this.ondata||I(5),this.d&&I(4),this.ondata(nn(t),this.d=n||!1)},t}();function nn(t,r){if(r){for(var e=new n(t.length),i=0;i<t.length;++i)e[i]=t.charCodeAt(i);return e}if(Vt)return Vt.encode(t);var o=t.length,s=new n(t.length+(t.length>>1)),a=0,u=function(t){s[a++]=t};for(i=0;i<o;++i){if(a+5>s.length){var h=new n(a+8+(o-i<<1));h.set(s),s=h}var f=t.charCodeAt(i);f<128||r?u(f):f<2048?(u(192|f>>6),u(128|63&f)):f>55295&&f<57344?(u(240|(f=65536+(1047552&f)|1023&t.charCodeAt(++i))>>18),u(128|f>>12&63),u(128|f>>6&63),u(128|63&f)):(u(224|f>>12),u(128|f>>6&63),u(128|63&f))}return D(s,0,a)}function rn(t,n){if(n){for(var r="",e=0;e<t.length;e+=16384)r+=String.fromCharCode.apply(null,t.subarray(e,e+16384));return r}if(Wt)return Wt.decode(t);var i=$t(t),o=i.s;return(r=i.r).length&&I(8),o}_e.EncodeUTF8=tn,_e.strToU8=nn,_e.strFromU8=rn;var en=function(t){return 1==t?3:t<6?2:9==t?1:0},on=function(t,n){return n+30+ht(t,n+26)+ht(t,n+28)},sn=function(t,n,r){var e=ht(t,n+28),i=rn(t.subarray(n+46,n+46+e),!(2048&ht(t,n+8))),o=n+46+e,s=ft(t,n+20),a=r&&4294967295==s?an(t,o):[s,ft(t,n+24),ft(t,n+42)],u=a[0],h=a[1],f=a[2];return[ht(t,n+10),u,h,i,o+ht(t,n+30)+ht(t,n+32),f]},an=function(t,n){for(;1!=ht(t,n);n+=4+ht(t,n+2));return[lt(t,n+12),lt(t,n+4),lt(t,n+20)]},un=function(t){var n=0;if(t)for(var r in t){var e=t[r].length;e>65535&&I(9),n+=e+4}return n},hn=function(t,n,r,e,i,o,s,a){var u=e.length,h=r.extra,f=a&&a.length,l=un(h);ct(t,n,null!=s?33639248:67324752),n+=4,null!=s&&(t[n++]=20,t[n++]=r.os),t[n]=20,n+=2,t[n++]=r.flag<<1|(o<0&&8),t[n++]=i&&8,t[n++]=255&r.compression,t[n++]=r.compression>>8;var c=new Date(null==r.mtime?Date.now():r.mtime),p=c.getFullYear()-1980;if((p<0||p>119)&&I(10),ct(t,n,p<<25|c.getMonth()+1<<21|c.getDate()<<16|c.getHours()<<11|c.getMinutes()<<5|c.getSeconds()>>1),n+=4,-1!=o&&(ct(t,n,r.crc),ct(t,n+4,o<0?-o-2:o),ct(t,n+8,r.size)),ct(t,n+12,u),ct(t,n+14,l),n+=16,null!=s&&(ct(t,n,f),ct(t,n+6,r.attrs),ct(t,n+10,s),n+=14),t.set(e,n),n+=u,l)for(var v in h){var d=h[v],g=d.length;ct(t,n,+v),ct(t,n+2,g),t.set(d,n+4),n+=4+g}return f&&(t.set(a,n),n+=f),n},fn=function(t,n,r,e,i){ct(t,n,101010256),ct(t,n+8,r),ct(t,n+10,r),ct(t,n+12,e),ct(t,n+16,i)},ln=function(){function t(t){this.filename=t,this.c=Y(),this.size=0,this.compression=0}return t.prototype.process=function(t,n){this.ondata(null,t,n)},t.prototype.push=function(t,n){this.ondata||I(5),this.c.p(t),this.size+=t.length,n&&(this.crc=this.c.d()),this.process(t,n||!1)},t}();_e.ZipPassThrough=ln;var cn=function(){function t(t,n){var r=this;n||(n={}),ln.call(this,t),this.d=new wt(n,(function(t,n){r.ondata(null,t,n)})),this.compression=8,this.flag=en(n.level)}return t.prototype.process=function(t,n){try{this.d.push(t,n)}catch(t){this.ondata(t,null,n)}},t.prototype.push=function(t,n){ln.prototype.push.call(this,t,n)},t}();_e.ZipDeflate=cn;var pn=function(){function t(t,n){var r=this;n||(n={}),ln.call(this,t),this.d=new xt(n,(function(t,n,e){r.ondata(t,n,e)})),this.compression=8,this.flag=en(n.level),this.terminate=this.d.terminate}return t.prototype.process=function(t,n){this.d.push(t,n)},t.prototype.push=function(t,n){ln.prototype.push.call(this,t,n)},t}();_e.AsyncZipDeflate=pn;var vn=function(){function t(t){this.ondata=t,this.u=[],this.d=1}return t.prototype.add=function(t){var r=this;if(this.ondata||I(5),2&this.d)this.ondata(I(4+8*(1&this.d),0,1),null,!1);else{var e=nn(t.filename),i=e.length,o=t.comment,s=o&&nn(o),a=i!=t.filename.length||s&&o.length!=s.length,u=i+un(t.extra)+30;i>65535&&this.ondata(I(11,0,1),null,!1);var h=new n(u);hn(h,0,t,e,a,-1);var f=[h],l=function(){for(var t=0,n=f;t<n.length;t++)r.ondata(null,n[t],!1);f=[]},c=this.d;this.d=0;var p=this.u.length,v=Q(t,{f:e,u:a,o:s,t:function(){t.terminate&&t.terminate()},r:function(){if(l(),c){var t=r.u[p+1];t?t.r():r.d=1}c=1}}),d=0;t.ondata=function(e,i,o){if(e)r.ondata(e,i,o),r.terminate();else if(d+=i.length,f.push(i),o){var s=new n(16);ct(s,0,134695760),ct(s,4,t.crc),ct(s,8,d),ct(s,12,t.size),f.push(s),v.c=d,v.b=u+d+16,v.crc=t.crc,v.size=t.size,c&&v.r(),c=1}else c&&l()},this.u.push(v)}},t.prototype.end=function(){var t=this;2&this.d?this.ondata(I(4+8*(1&this.d),0,1),null,!0):(this.d?this.e():this.u.push({r:function(){1&t.d&&(t.u.splice(-1,1),t.e())},t:function(){}}),this.d=3)},t.prototype.e=function(){for(var t=0,r=0,e=0,i=0,o=this.u;i<o.length;i++)e+=46+(h=o[i]).f.length+un(h.extra)+(h.o?h.o.length:0);for(var s=new n(e+22),a=0,u=this.u;a<u.length;a++){var h;hn(s,t,h=u[a],h.f,h.u,-h.c-2,r,h.o),t+=46+h.f.length+un(h.extra)+(h.o?h.o.length:0),r+=h.b}fn(s,t,this.u.length,e,r),this.ondata(null,s,!0),this.d=2},t.prototype.terminate=function(){for(var t=0,n=this.u;t<n.length;t++)n[t].t();this.d=2},t}();function dn(t,r,e){e||(e=r,r={}),"function"!=typeof e&&I(7);var i={};Rt(t,"",i,r);var o=Object.keys(i),s=o.length,a=0,u=0,h=s,f=Array(s),l=[],c=function(){for(var t=0;t<l.length;++t)l[t]()},p=function(t,n){xn((function(){e(t,n)}))};xn((function(){p=e}));var v=function(){var t=new n(u+22),r=a,e=u-a;u=0;for(var i=0;i<h;++i){var o=f[i];try{var s=o.c.length;hn(t,u,o,o.f,o.u,s);var l=30+o.f.length+un(o.extra),c=u+l;t.set(o.c,c),hn(t,a,o,o.f,o.u,s,u,o.m),a+=16+l+(o.m?o.m.length:0),u=c+s}catch(t){return p(t,null)}}fn(t,a,f.length,e,r),p(null,t)};s||v();for(var d=function(t){var n=o[t],r=i[n],e=r[0],h=r[1],d=Y(),g=e.length;d.p(e);var y=nn(n),m=y.length,b=h.comment,w=b&&nn(b),x=w&&w.length,z=un(h.extra),k=0==h.level?0:8,M=function(r,e){if(r)c(),p(r,null);else{var i=e.length;f[t]=Q(h,{size:g,crc:d.d(),c:e,f:y,m:w,u:m!=n.length||w&&b.length!=x,compression:k}),a+=30+m+z+i,u+=76+2*(m+z)+(x||0)+i,--s||v()}};if(m>65535&&M(I(11,0,1),null),k)if(g<16e4)try{M(null,kt(e,h))}catch(t){M(t,null)}else l.push(zt(e,h,M));else M(null,e)},g=0;g<h;++g)d(g);return c}function gn(t,r){r||(r={});var e={},i=[];Rt(t,"",e,r);var o=0,s=0;for(var a in e){var u=e[a],h=u[0],f=u[1],l=0==f.level?0:8,c=(M=nn(a)).length,p=f.comment,v=p&&nn(p),d=v&&v.length,g=un(f.extra);c>65535&&I(11);var y=l?kt(h,f):h,m=y.length,b=Y();b.p(h),i.push(Q(f,{size:h.length,crc:b.d(),c:y,f:M,m:v,u:c!=a.length||v&&p.length!=d,o:o,compression:l})),o+=30+c+g+m,s+=76+2*(c+g)+(d||0)+m}for(var w=new n(s+22),x=o,z=s-o,k=0;k<i.length;++k){var M;hn(w,(M=i[k]).o,M,M.f,M.u,M.c.length);var S=30+M.f.length+un(M.extra);w.set(M.c,M.o+S),hn(w,o,M,M.f,M.u,M.c.length,M.o,M.m),o+=16+S+(M.m?M.m.length:0)}return fn(w,o,i.length,z,x),w}_e.Zip=vn,_e.zip=dn,_e.zipSync=gn;var yn=function(){function t(){}return t.prototype.push=function(t,n){this.ondata(null,t,n)},t.compression=0,t}();_e.UnzipPassThrough=yn;var mn=function(){function t(){var t=this;this.i=new Mt((function(n,r){t.ondata(null,n,r)}))}return t.prototype.push=function(t,n){try{this.i.push(t,n)}catch(t){this.ondata(t,null,n)}},t.compression=8,t}();_e.UnzipInflate=mn;var bn=function(){function t(t,n){var r=this;n<32e4?this.i=new Mt((function(t,n){r.ondata(null,t,n)})):(this.i=new St((function(t,n,e){r.ondata(t,n,e)})),this.terminate=this.i.terminate)}return t.prototype.push=function(t,n){this.i.terminate&&(t=D(t,0)),this.i.push(t,n)},t.compression=8,t}();_e.AsyncUnzipInflate=bn;var wn=function(){function t(t){this.onfile=t,this.k=[],this.o={0:yn},this.p=N}return t.prototype.push=function(t,r){var e=this;if(this.onfile||I(5),this.p||I(4),this.c>0){var i=Math.min(this.c,t.length),o=t.subarray(0,i);if(this.c-=i,this.d?this.d.push(o,!this.c):this.k[0].push(o),(t=t.subarray(i)).length)return this.push(t,r)}else{var s=0,a=0,u=void 0,h=void 0;this.p.length?t.length?((h=new n(this.p.length+t.length)).set(this.p),h.set(t,this.p.length)):h=this.p:h=t;for(var f=h.length,l=this.c,c=l&&this.d,p=function(){var t,n=ft(h,a);if(67324752==n){s=1,u=a,v.d=null,v.c=0;var r=ht(h,a+6),i=ht(h,a+8),o=2048&r,c=8&r,p=ht(h,a+26),d=ht(h,a+28);if(f>a+30+p+d){var g=[];v.k.unshift(g),s=2;var y,m=ft(h,a+18),b=ft(h,a+22),w=rn(h.subarray(a+30,a+=30+p),!o);4294967295==m?(t=c?[-2]:an(h,a),m=t[0],b=t[1]):c&&(m=-1),a+=d,v.c=m;var x={name:w,compression:i,start:function(){if(x.ondata||I(5),m){var t=e.o[i];t||x.ondata(I(14,"unknown compression type "+i,1),null,!1),(y=m<0?new t(w):new t(w,m,b)).ondata=function(t,n,r){x.ondata(t,n,r)};for(var n=0,r=g;n<r.length;n++)y.push(r[n],!1);e.k[0]==g&&e.c?e.d=y:y.push(N,!0)}else x.ondata(null,N,!0)},terminate:function(){y&&y.terminate&&y.terminate()}};m>=0&&(x.size=m,x.originalSize=b),v.onfile(x)}return"break"}if(l){if(134695760==n)return u=a+=12+(-2==l&&8),s=3,v.c=0,"break";if(33639248==n)return u=a-=4,s=3,v.c=0,"break"}},v=this;a<f-4&&"break"!==p();++a);if(this.p=N,l<0){var d=h.subarray(0,s?u-12-(-2==l&&8)-(134695760==ft(h,u-16)&&4):a);c?c.push(d,!!s):this.k[+(2==s)].push(d)}if(2&s)return this.push(h.subarray(a),r);this.p=h.subarray(a)}r&&(this.c&&I(13),this.p=null)},t.prototype.register=function(t){this.o[t.compression]=t},t}();_e.Unzip=wn;var xn="function"==typeof queueMicrotask?queueMicrotask:"function"==typeof setTimeout?setTimeout:function(t){t()};function zn(t,r,e){e||(e=r,r={}),"function"!=typeof e&&I(7);var i=[],o=function(){for(var t=0;t<i.length;++t)i[t]()},s={},a=function(t,n){xn((function(){e(t,n)}))};xn((function(){a=e}));for(var u=t.length-22;101010256!=ft(t,u);--u)if(!u||t.length-u>65558)return a(I(13,0,1),null),o;var h=ht(t,u+8);if(h){var f=h,l=ft(t,u+16),c=4294967295==l||65535==f;if(c){var p=ft(t,u-12);(c=101075792==ft(t,p))&&(f=h=ft(t,p+32),l=ft(t,p+48))}for(var v=r&&r.filter,d=function(r){var e=sn(t,l,c),u=e[0],f=e[1],p=e[2],d=e[3],g=e[4],y=on(t,e[5]);l=g;var m=function(t,n){t?(o(),a(t,null)):(n&&(s[d]=n),--h||a(null,s))};if(!v||v({name:d,size:f,originalSize:p,compression:u}))if(u)if(8==u){var b=t.subarray(y,y+f);if(p<524288||f>.8*p)try{m(null,Tt(b,{out:new n(p)}))}catch(t){m(t,null)}else i.push(At(b,{size:p},m))}else m(I(14,"unknown compression type "+u,1),null);else m(null,D(t,y,y+f));else m(null,null)},g=0;g<f;++g)d()}else a(null,{});return o}function kn(t,r){for(var e={},i=t.length-22;101010256!=ft(t,i);--i)(!i||t.length-i>65558)&&I(13);var o=ht(t,i+8);if(!o)return{};var s=ft(t,i+16),a=4294967295==s||65535==o;if(a){var u=ft(t,i-12);(a=101075792==ft(t,u))&&(o=ft(t,u+32),s=ft(t,u+48))}for(var h=r&&r.filter,f=0;f<o;++f){var l=sn(t,s,a),c=l[0],p=l[1],v=l[2],d=l[3],g=l[4],y=on(t,l[5]);s=g,h&&!h({name:d,size:p,originalSize:v,compression:c})||(c?8==c?e[d]=Tt(t.subarray(y,y+p),{out:new n(v)}):I(14,"unknown compression type "+c):e[d]=D(t,y,y+p))}return e}_e.unzip=zn,_e.unzipSync=kn;return _e});
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   鹿豹 LuLeopard — 台灣測速照相預報 PWA 原型
+   單檔、無建置流程。資料層 / 定位層 / 警示層 / UI 層分離。
+   ═══════════════════════════════════════════════════════════ */
+(function(){
+'use strict';
+
+/* ---------- 0. 持久化（沙箱環境自動退回記憶體） ---------- */
+const Store=(function(){
+  let ok=false, mem={};
+  try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); ok=true; }catch(e){ ok=false; }
+  return {
+    persistent:ok,
+    get(k,d){ try{ const v= ok? localStorage.getItem(k) : mem[k];
+      return v==null? d : JSON.parse(v); }catch(e){ return d; } },
+    set(k,v){ const s=JSON.stringify(v); try{ ok? localStorage.setItem(k,s) : (mem[k]=s); }catch(e){ mem[k]=s; } },
+    del(k){ try{ ok? localStorage.removeItem(k) : delete mem[k]; }catch(e){} },
+    clear(){ try{ if(ok){ Object.keys(localStorage).filter(k=>k.startsWith('lp.')).forEach(k=>localStorage.removeItem(k)); } mem={}; }catch(e){ mem={}; } }
+  };
+})();
+const K=k=>'lp.'+k;
+
+/* ---------- 1. 設定 ---------- */
+/* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
+   一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
+const APP_VER='v1.5';
+const APP_STAGE='公測版';
+/* 建置序號：YYYYMMDD.HHmm（台灣時間）。
+   公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
+   「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
+   這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
+const APP_BUILD='20260830.1330';
+
+const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
+           t1:600,t2:300,t3:120,simSpd:70,
+           feedUrl:'',feedAuto:false,feedLast:0,feedCount:0,
+           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,
+           powerSave:true,powerAfterMin:5,
+           roadUrl:'',roadCount:0,
+           tdxId:'',tdxSecret:'',
+           tdxPath:'https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/Freeway/Section?%24top=50&%24format=JSON'};
+let CFG=Object.assign({},DEF,Store.get(K('cfg'),{}));
+const saveCfg=()=>Store.set(K('cfg'),CFG);
+
+/* ---------- 2. 內建示範點位 ---------- */
+/* [lat, lon, 速限, 方向, 名稱]
+   國道 177 點：內政部警政署國道公路警察局「國道公路固定式測速照相地點」(1150720)
+   縣道 138 點：內政部警政署「測速執法設置點」宜蘭縣 + 新竹縣
+   合計 315 點，其中 236 點名稱含樁號，可當里程錨點 */
+const SEED=[[22.507159,120.524929,110,"南往北","國道三號北向423.2公里"],[22.508149,120.524813,110,"北往南","國道三號南向423.1公里"],[22.585746,120.328357,60,"北往南","國道一號南向373.5公里"],[22.586142,120.329146,60,"南往北","國道一號北向373.4公里"],[22.677533,120.328733,100,"北往南","國道一號南向362.5公里"],[22.758016,120.471478,110,"南往北","國道三號北向389.3公里"],[22.7585,120.33219,110,"北往南","國道一號南向353.4公里"],[22.759114,120.332099,110,"南往北","國道一號北向353.3公里"],[22.760332,120.386905,100,"西往東","國道十號東向14.7公里"],[22.769219,120.441592,110,"北往南","國道三號南向386公里"],[22.770908,120.406753,100,"東往西","國道十號西向16.8公里"],[22.795574,120.437507,100,"西往東","國道十號東向21.4公里"],[22.820844,120.41966,110,"北往南","國道三號南向378.85公里"],[22.825377,120.488103,100,"東往西","國道十號西向28.3公里"],[22.84931,120.382939,110,"南往北","國道三號北向374.3公里"],[22.862397,120.369234,110,"北往南","國道三號南向372.3公里"],[22.867977,120.28468,110,"北往南","國道一號南向340.2公里"],[22.896294,120.270433,110,"南往北","國道一號北向336.7公里"],[22.918658,120.260136,110,"南往北","國道一號北向334公里"],[22.970579,120.338467,110,"北往南","國道三號南向358.6公里"],[23.011912,120.249371,110,"南往北","國道一號北向323.4公里"],[23.026246,120.249296,110,"北往南","國道一號南向321.8公里"],[23.080551,120.195444,80,"西往東","國道八號東向0公里"],[23.080551,120.195444,80,"東往西","國道八號西向0公里"],[23.082615,120.251739,110,"北往南","國道一號南向315.5公里"],[23.083381,120.329218,110,"南往北","國道三號北向344.7公里"],[23.089607,120.209621,80,"西往東","國道八號東向4.2公里"],[23.110423,120.327289,110,"北往南","國道三號南向342.1公里"],[23.137454,120.234682,110,"南往北","國道一號北向309.1公里"],[23.16412,120.231495,110,"北往南","國道一號南向306.1公里"],[23.201337,120.355492,110,"南往北","國道三號北向331公里"],[23.204189,120.23653,110,"北往南","國道一號南向301.6公里"],[23.204871,120.236717,110,"南往北","國道一號北向301.5公里"],[23.27464,120.267327,110,"北往南","國道一號南向293.1公里"],[23.278519,120.271282,110,"南往北","國道一號北向292.5公里"],[23.298801,120.407292,110,"南往北","國道三號北向318.7公里"],[23.33292,120.30184,110,"南往北","國道三號北向284.07公里"],[23.333214,120.433591,110,"北往南","國道三號南向313.7公里"],[23.334304,120.306842,110,"北往南","國道一號南向285.3公里"],[23.373209,120.350715,110,"北往南","國道一號南向279公里"],[23.387621,120.355291,110,"南往北","國道一號北向277.3公里"],[23.397736,120.355248,110,"北往南","國道一號南向276.2公里"],[23.43075,120.36124,110,"北往南","國道三號南向262.01公里"],[23.516769,120.404041,110,"南往北","國道一號北向261.7公里"],[23.527652,120.405818,110,"北往南","國道一號南向260.5公里"],[23.570353,120.505462,110,"北往南","國道三號南向282.7公里"],[23.581107,120.428493,110,"南往北","國道一號北向254.1公里"],[23.59276,120.39066,110,"北往南","國道三號南向218.9公里"],[23.597475,120.434351,110,"北往南","國道一號南向252.2公里"],[23.641596,120.443773,110,"北往南","國道一號南向247.2公里"],[23.643088,120.444303,110,"南往北","國道一號北向246.8公里"],[23.692923,120.598801,110,"南往北","國道三號北向265.1公里"],[23.712355,120.476085,110,"北往南","國道一號南向238.6公里"],[23.75788,120.467784,110,"南往北","國道一號北向233.4公里"],[23.774884,120.628718,110,"北往南","國道三號南向253.2公里"],[23.777444,120.687927,110,"南往北","國道三號北向247.1公里"],[23.831925,120.484809,110,"南往北","國道一號北向224.9公里"],[23.844749,120.484221,110,"北往南","國道一號南向223.5公里"],[23.869972,120.705085,110,"南往北","國道三號北向235.2公里"],[23.981101,120.890991,100,"東往西","國道六號西向26公里"],[23.982555,120.988139,100,"西往東","國道六號東向36.5公里"],[23.985535,120.778725,100,"西往東","國道六號東向12.5公里"],[23.996188,120.801365,100,"東往西","國道六號西向15.6公里"],[23.999996,120.650424,110,"南往北","國道三號北向218公里"],[24.053078,120.523776,110,"北往南","國道一號南向200.1公里"],[24.071048,120.638644,110,"南往北","國道三號北向206.6公里"],[24.105671,120.553814,60,"南北向","國道三號彰化系統交流道南北向出口交會處（匝道5K+514）公里"],[24.113134,120.597491,110,"北往南","國道一號南向187.5公里"],[24.116181,120.59194,110,"南往北","國道一號北向188公里"],[24.178511,120.548761,110,"南往北","國道三號北向186.1公里"],[24.190897,120.561881,110,"北往南","國道三號南向184.1公里"],[24.211574,120.669153,110,"南往北","國道一號北向172.8公里"],[24.214232,120.673167,110,"北往南","國道一號南向172.4公里"],[24.220844,120.725269,100,"西往東","國道四號東向24.778公里"],[24.228313,120.685159,110,"北往南","國道一號南向170.3公里"],[24.229563,120.590926,110,"北往南","國道三號南向178.6公里"],[24.230285,120.732593,100,"東往西","國道四號西向23.3公里"],[24.236176,120.593715,110,"南往北","國道三號北向177.8公里"],[24.273297,120.693088,110,"北往南","國道一號南向165.3公里"],[24.293697,120.602092,110,"南往北","國道三號北向171公里"],[24.305093,120.62779,100,"東往西","國道四號西向4.4公里"],[24.330594,120.628545,110,"北往南","國道三號南向166公里"],[24.337972,120.720331,110,"南往北","國道一號北向157.4公里"],[24.347893,121.7668,70,"北上方向","宜蘭縣南澳鄉 台9線139k+667m谷風隧道北上"],[24.350206,120.658836,110,"南往北","國道三號北向162.1公里"],[24.350278,120.658717,110,"北往南","國道三號南向162.1公里"],[24.355694,121.771545,70,"南下方向","宜蘭縣南澳鄉 台9線138k+677m谷風隧道南下"],[24.365217,121.77798,70,"南北雙向(區間測速)","宜蘭縣南澳鄉 台9線137K+295m至141K+458m(谷風隧道)"],[24.37083,120.746455,100,"北往南","國道一號南向152.9公里"],[24.377888,121.78324,70,"南下方向","宜蘭縣南澳鄉 台9線135K+910m觀音隧道南下"],[24.378277,121.7837,70,"北上方向","宜蘭縣南澳鄉 台9線135K+841m觀音隧道北上"],[24.401218,121.78592,70,"南下方向","宜蘭縣南澳鄉 台9線133k+289m觀音隧道南下"],[24.401888,121.78618,70,"北上方向","宜蘭縣南澳鄉 台9線133k+174m觀音隧道北上"],[24.42525,121.78068,70,"南下方向","宜蘭縣南澳鄉 台9線130k+492m觀音隧道南下"],[24.426088,121.780174,70,"北上方向","宜蘭縣南澳鄉 台9線130k+347m觀音隧道北上"],[24.433311,121.77481,70,"南北雙向(區間測速)","宜蘭縣南澳鄉 台9線129k+404m至136k+883m(觀音隧道)"],[24.453047,120.67839,110,"北往南","國道三號南向150.2公里"],[24.462055,120.788041,100,"南往北","國道一號北向141.7公里"],[24.46758,121.80645,50,"南北雙向","宜蘭縣南澳鄉 台9線123k+570m南澳段北上"],[24.490236,121.83023,40,"北上方向","宜蘭縣蘇澳鎮 台9線117k+772m新澳隧道北上"],[24.507293,120.713148,110,"北往南","國道三號南向142.9公里"],[24.511134,120.808679,100,"南往北","國道一號北向134.7公里"],[24.536793,121.836655,70,"南北雙向(區間測速)","宜蘭縣南澳鄉 南澳鄉台9線110k+960m至蘇澳鎮台9線108k+224m(東澳隧道)"],[24.547905,121.83988,70,"北上方向","宜蘭縣南澳鄉 台9線110k+300m東澳隧道北上"],[24.55043,121.10031,100,"北往南","國道一號南向68公里"],[24.55137,121.10067,100,"南往北","國道一號北向66.6公里"],[24.551512,120.839355,100,"北往南","國道一號南向129.15公里"],[24.551931,121.84039,70,"南下方向","宜蘭縣蘇澳鎮 台9線109k+240m東澳隧道南下"],[24.564767,120.846212,100,"南往北","國道一號北向127.5公里"],[24.570803,120.852749,100,"北往南","國道一號南向126.5公里"],[24.590792,121.8595,60,"南北雙向","宜蘭縣蘇澳鎮 台2戊線12k+215m移山路北上"],[24.591296,120.779072,110,"南往北","國道三號北向131.2公里"],[24.592031,120.860444,100,"北往南","國道一號南向124公里"],[24.59536,121.84053,50,"南北雙向","宜蘭縣蘇澳鎮 台9線103k+562m南下"],[24.598513,121.856255,60,"南北雙向","宜蘭縣蘇澳鎮 台2線166k+259m蘇澳港段南下"],[24.60313,121.83417,60,"南北雙向","宜蘭縣蘇澳鎮 台9線102k+200m聖湖段南下"],[24.611954,121.85278,70,"南北雙向","宜蘭縣蘇澳鎮 台2線164k+390m港邊段南下"],[24.615463,121.821266,60,"南北雙向","宜蘭縣蘇澳鎮 台9線100k+224m新城段北上"],[24.63744,121.805564,90,"北往南","國道五號南向52.7公里"],[24.645603,121.78557,60,"南北雙向","宜蘭縣冬山鄉 台9線94k+450m冬山段南下"],[24.648778,120.831179,40,"南往北","國道三號北向122.5公里"],[24.664686,121.82835,60,"南北雙向","宜蘭縣五結鄉 台2線157k+200m利澤段北上"],[24.667261,121.697624,60,"東西雙向","宜蘭縣三星鄉 台7丙線18k+342m大隱段東向"],[24.670204,121.71217,60,"東西雙向","宜蘭縣三星鄉 台7丙線19k+865m大隱段西向"],[24.672573,121.78949,60,"東西雙向","宜蘭縣羅東鎮 台7丙線28k+98m中山路東向"],[24.673485,121.80519,60,"東西雙向","宜蘭縣五結鄉 台7丙線29K+743M親河路西向"],[24.677273,121.67725,60,"東西雙向","宜蘭縣三星鄉 196線3k+800m萬富段東向"],[24.68059,121.76142,40,"東西雙向","宜蘭縣羅東鎮 公正路324號東西雙向"],[24.683813,121.79258,60,"南北雙向","宜蘭縣五結鄉 191線與196線路口北上"],[24.687069,121.71839,60,"東西雙向","宜蘭縣三星鄉 196線7k+900m大埔段西向"],[24.688986,121.791145,60,"南北雙向","宜蘭縣五結鄉 191線與宜24線路口南下"],[24.69168,121.03163,60,"北往南","新竹縣峨眉鄉 中豐公路中興中盛村路口"],[24.691969,120.853314,110,"北往南","國道三號南向117.1公里"],[24.69473,120.9788,60,"西往東","新竹縣峨眉鄉 台3線91.2公里"],[24.696066,121.72893,60,"南北雙向","宜蘭縣三星鄉 宜61線3k+800m大洲段北上"],[24.69619,120.857787,110,"南往北","國道三號北向116.5公里"],[24.69807,121.72788,60,"南北雙向","宜蘭縣三星鄉 宜61線3k+600m大洲段南下"],[24.69997,120.99114,60,"南往北","新竹縣峨眉鄉 台3線89.6公里"],[24.700827,121.74223,50,"東西雙向","宜蘭縣三星鄉 196線11k大洲段東向"],[24.70087,120.99424,60,"北往南","新竹縣峨眉鄉 台3線89.4公里"],[24.703253,121.78074,50,"東西雙向","宜蘭縣五結鄉 宜25線1K五結中路三段東向"],[24.70351,121.04712,60,"南北雙向(區間測速)","新竹縣峨眉鄉 台3線82.2公里至84.3公里"],[24.707457,121.709625,60,"東西雙向","宜蘭縣員山鄉 宜18-2線9k深溝段西向"],[24.709387,121.81058,60,"東西雙向","宜蘭縣五結鄉 宜22線6k錦草段西向"],[24.710798,121.76619,60,"東西雙向","宜蘭縣五結鄉 宜22線1k+500m二結段東向"],[24.714243,121.738594,50,"東西雙向","宜蘭縣員山鄉 宜18-2線溪洲路346號東向"],[24.714918,120.893754,110,"北往南","國道三號南向112.2公里"],[24.71743,121.71865,60,"南北雙向","宜蘭縣員山鄉 宜61線1k+200m深溝段北上"],[24.717842,121.700935,60,"東西雙向","宜蘭縣員山鄉 台7線113k+357m內城段東向"],[24.71843,121.76466,50,"東西雙向","宜蘭縣宜蘭市 宜16線5.5K南津路東向"],[24.719,121.748116,50,"東西雙向","宜蘭縣員山鄉 宜18-2線溪洲路150號西向"],[24.719269,121.80265,50,"東西雙向","宜蘭縣壯圍鄉 宜16線9k+500m美福段東向"],[24.720016,121.717964,60,"南北雙向","宜蘭縣員山鄉 宜61線900m深溝段南下"],[24.720304,121.783035,50,"東西雙向","宜蘭縣壯圍鄉 宜16線7k+500m新南段西向"],[24.72037,121.11664,60,"東西雙向","新竹縣橫山鄉 中豐路一段與站前街口"],[24.72303,121.10155,50,"東西雙向","新竹縣竹東鎮 中豐路與台68線路口"],[24.72385,121.07848,50,"南往北","新竹縣竹東鎮 中豐路三段老爺山莊路口"],[24.72474,121.12524,60,"南北雙向","新竹縣橫山鄉 中豐路與中豐路二段12巷口"],[24.725124,120.9376,100,"北往南","國道一號南向106公里"],[24.726902,120.947318,100,"南往北","國道一號北向105.5公里"],[24.727465,121.808556,60,"東西雙向","宜蘭縣壯圍鄉 宜20線1k+150m新南段西向"],[24.72859,121.03269,40,"南往北","新竹縣寶山鄉 寶山路一段228號"],[24.73036,121.81915,60,"南北雙向","宜蘭縣壯圍鄉 台2線150k+199m公館段南下"],[24.732752,121.71639,60,"東西雙向","宜蘭縣員山鄉 台7線115k+865m八甲段西向"],[24.736074,120.968521,100,"北往南","國道一號南向102.5公里"],[24.738028,121.76105,60,"南北雙向","宜蘭縣宜蘭市 中山路1段560號前北上"],[24.7405,121.16245,50,"北往南","新竹縣橫山鄉 中豐路三段139號"],[24.74125,121.10885,60,"南北雙向","新竹縣芎林鄉 富林路一段518號"],[24.74368,120.95915,50,"北往南","新竹縣寶山鄉 竹47-1線4.1公里"],[24.746012,120.925391,110,"北往南","國道三號南向107.4公里"],[24.74614,121.00037,40,"南往北","新竹縣寶山鄉 三峰路二段8號"],[24.746742,121.816315,60,"南北雙向","宜蘭縣壯圍鄉 台2線148k+400m後埤段北上"],[24.74875,121.77163,70,"南北雙向","宜蘭縣宜蘭市 台9線81k+595m環市東路北上"],[24.749315,121.77766,60,"東西雙向","宜蘭縣宜蘭市 台7線123k+900m東港段西向"],[24.74986,121.08011,50,"北往南","新竹縣竹東鎮 台68線竹東匝道口與北興路三段"],[24.75126,121.01968,40,"北往南","新竹縣寶山鄉 寶山路二段竹83線0.8公里"],[24.7525,121.0755,50,"北往南","新竹縣竹東鎮 中興路一段94-2號"],[24.75611,121.07032,50,"東西雙向","新竹縣竹東鎮 中興路一段與中興路一段229巷口"],[24.756819,121.771355,70,"南北雙向","宜蘭縣宜蘭市 台9線80k+700m環市東路黎霧橋南端南下"],[24.758747,121.81548,60,"南北雙向","宜蘭縣壯圍鄉 台2線147k+40m過嶺國小南下"],[24.761602,121.79351,60,"南北雙向","宜蘭縣壯圍鄉 宜9線3k+100m中央路三段南下"],[24.76347,121.17272,50,"南往北","新竹縣關西鎮 台3線62.1公里"],[24.76567,121.08224,60,"東往西","新竹縣芎林鄉 竹120線11.5公里竹林交流道北上匝道口"],[24.767035,121.770744,70,"南北雙向","宜蘭縣宜蘭市 台9線79k+550m環市東路與192甲線路口北上"],[24.76711,121.081475,110,"北往南","國道三號南向90.2公里"],[24.76755,120.99763,50,"北往南","新竹縣寶山鄉 雙園路二段與雙園二街口"],[24.77466,121.07385,60,"南北雙向","新竹縣芎林鄉 文德路6號"],[24.77501,121.17615,50,"南北雙向","新竹縣關西鎮 中豐公路與十六張路口"],[24.778543,121.75933,60,"南北雙向","宜蘭縣宜蘭市 台9線78k中山路五段南下"],[24.78052,121.06951,60,"東西雙向","新竹縣芎林鄉 富林路三段與光明路口"],[24.7843,121.07964,50,"北往南","新竹縣芎林鄉 文德路259號"],[24.78785,121.03028,50,"東往西","新竹縣竹東鎮 公道路616號前"],[24.78851,121.18603,60,"南北雙向","新竹縣關西鎮 中豐公路與中山東路口"],[24.789581,121.784225,60,"南北雙向","宜蘭縣礁溪鄉 191甲線6k+600m玉田段北上"],[24.79072,121.78079,60,"南北雙向","宜蘭縣礁溪鄉 191線4K瑪僯段北上"],[24.791381,121.126079,110,"南往北","國道三號北向84.6公里"],[24.791564,121.780956,90,"南往北","國道五號北向34.9公里"],[24.7936,121.03848,90,"西往東","新竹縣竹東鎮 台68線12.3公里處"],[24.79509,121.0357,90,"東往西","新竹縣竹東鎮 台68線12公里處"],[24.7978,121.05449,60,"東西雙向","新竹縣竹北市 東興路二段316號前(120線7.1公里)"],[24.7996,121.05292,60,"東西雙向","新竹縣竹北市 東興路二段198號前"],[24.79972,121.81658,60,"南北雙向","宜蘭縣壯圍鄉 台2線142k+480m大福段北上"],[24.80531,121.14964,50,"東往西","新竹縣關西鎮 大同茅仔埔5鄰35號"],[24.807201,121.149866,110,"北往南","國道三號南向81.5公里"],[24.81258,121.19964,60,"南北雙向","新竹縣關西鎮 中豐公路牛欄河6鄰63號"],[24.81264,121.01766,50,"東西雙向","新竹縣竹北市 竹北市興隆路與莊敬南路口(新竹地方法院前)"],[24.81272,121.03502,50,"西往東","新竹縣竹北市 竹北市光明六路東二段與嘉豐南路一段口"],[24.81359,121.02348,50,"南北雙向","新竹縣竹北市 自強南路與文興路口"],[24.81598,121.11576,60,"東往西","新竹縣關西鎮 石岡子路736號"],[24.818115,121.810684,50,"東西雙向","宜蘭縣礁溪鄉 宜4線4k+280m大塭段東向"],[24.822088,121.09389,60,"西往東","新竹縣新埔鎮 新關路五埔段與1046巷口"],[24.824112,121.82069,60,"南北雙向","宜蘭縣頭城鎮 台2線139k+738m竹安段南下"],[24.82536,121.05772,50,"東往西","新竹縣新埔鎮 文山路亞東段369號"],[24.82592,120.9974,50,"南北雙向","新竹縣竹北市 中華路與興隆路口"],[24.82608,121.0333,50,"南北雙向","新竹縣竹北市 竹北市自強北路與十興路口"],[24.826906,121.05023,50,"東西雙向","新竹縣新埔鎮 文山路亞東段1008號"],[24.828068,121.80138,60,"南北雙向","宜蘭縣頭城鎮 191甲線2k+50m中崙段南下"],[24.8297,121.78401,50,"南北雙向","宜蘭縣礁溪鄉 份尾三路北上(份尾橋南側100公尺處)"],[24.83044,121.0363,40,"南北雙向","新竹縣新埔鎮 褒忠路與文山路犁頭山段口"],[24.83119,121.00229,50,"南北雙向","新竹縣竹北市 中華路212號前(台1線70.1公里)"],[24.83135,121.08766,50,"東往西","新竹縣新埔鎮 楊新路楊新路一段322號"],[24.83195,120.98258,50,"南往北","新竹縣竹北市 溪洲路與新溪街口"],[24.84562,121.79265,60,"南北雙向","宜蘭縣頭城鎮 台9線69k+20m北宜路一段南下"],[24.849024,121.79389,40,"南北雙向","宜蘭縣頭城鎮 台9線68.6K北宜路一段南下"],[24.849024,121.79389,40,"南北雙向(區間測速)","宜蘭縣頭城鎮 台9線68k+600m至56k+600m"],[24.84921,121.79603,50,"南北雙向","宜蘭縣頭城鎮 宜3線3k+850m宜三路南下"],[24.85527,121.00192,60,"北往南","新竹縣竹北市 中華路與鳳岡路口南下"],[24.85749,121.00296,50,"南往北","新竹縣竹北市 中華路與鳳岡路口北上"],[24.857557,121.210519,110,"南往北","國道三號北向69.5公里"],[24.85875,120.99416,60,"南北雙向","新竹縣竹北市 中華路與中華路1483巷口"],[24.859917,121.010661,100,"北往南","國道一號南向86.5公里"],[24.860129,121.788058,90,"北往南","國道五號南向26.7公里"],[24.860365,121.788341,90,"南往北","國道五號北向26.7公里"],[24.86839,120.95324,70,"北往南","新竹縣竹北市 西濱路一段與西濱路二段265巷口(台61線)"],[24.869598,121.778895,90,"北往南","國道五號南向25.3公里"],[24.869922,121.779332,90,"南往北","國道五號北向25.3公里"],[24.871765,121.83554,60,"南北雙向","宜蘭縣頭城鎮 台2線133k+769m港口段南下"],[24.875991,121.055756,100,"南往北","國道一號北向81.1公里"],[24.876559,121.046089,100,"南往北","國道一號北向82.1公里"],[24.876605,121.048805,100,"北往南","國道一號南向81.8公里"],[24.87876,121.769417,90,"北往南","國道五號南向23.9公里"],[24.879106,121.769874,90,"南往北","國道五號北向23.9公里"],[24.87972,121.0071,60,"南北雙向","新竹縣湖口鄉 新興路與中華路口"],[24.87992,120.95467,60,"南北雙向(區間測速)","新竹縣新豐鄉 台15線鳳鼻隧道"],[24.88042,121.03597,60,"南北雙向","新竹縣湖口鄉 八德路一段與中山路一段口"],[24.881098,121.255459,110,"北往南","國道三號南向64.2公里"],[24.884719,121.082151,100,"北往南","國道一號南向78.2公里"],[24.88507,121.02363,60,"南北雙向","新竹縣湖口鄉 八德路一段35號前(台1線61公里)"],[24.88637,121.08199,60,"南北雙向","新竹縣湖口鄉 八德路二段579號前"],[24.88783,121.03979,50,"南北雙向","新竹縣湖口鄉 中山路一段與忠義路口"],[24.88923,121.761764,90,"北往南","國道五號南向22.5公里"],[24.889566,121.762216,90,"南往北","國道五號北向22.5公里"],[24.889975,121.02174,60,"南北雙向","新竹縣湖口鄉 成功路與三元路路口"],[24.891298,121.85049,50,"南北雙向","宜蘭縣頭城鎮 台2線131k+121m外澳段南下"],[24.89645,121.04233,50,"南北雙向","新竹縣湖口鄉 中山路一段與達生路口"],[24.8989,120.96891,90,"南北雙向","新竹縣新豐鄉 台61線60.1公里處"],[24.899525,121.753732,90,"北往南","國道五號南向21.1公里"],[24.89985,121.754179,90,"南往北","國道五號北向21.1公里"],[24.900974,121.86346,50,"南北雙向","宜蘭縣頭城鎮 台2線129k+309m梗枋國小南下"],[24.906073,121.87091,60,"南北雙向","宜蘭縣頭城鎮 台2線128k+65m梗枋地磅站北上"],[24.907924,121.743366,90,"北往南","國道五號南向19.7公里"],[24.908276,121.743818,90,"南往北","國道五號北向19.7公里"],[24.916126,121.732855,90,"北往南","國道五號南向18.3公里"],[24.916479,121.733311,90,"南往北","國道五號北向18.3公里"],[24.91873,120.98484,60,"南北雙向","新竹縣新豐鄉 台15線64.4公里處"],[24.924304,121.304277,110,"南往北","國道三號北向57公里"],[24.925926,121.72434,90,"北往南","國道五號南向16.9公里"],[24.926279,121.724806,90,"南往北","國道五號北向16.9公里"],[24.9264,120.99114,60,"南北雙向","新竹縣新豐鄉 台15線62.8公里處"],[24.93193,120.9964,60,"南北雙向","新竹縣新豐鄉 濱海公路埔和村189號之1"],[24.939224,121.89127,50,"南北雙向","宜蘭縣頭城鎮 台2線123k+642m大溪段北上"],[24.941028,121.193528,100,"南往北","國道一號五楊北向64.3公里"],[24.945833,121.194772,100,"南往北","國道一號北向63.7公里"],[24.949272,121.701534,80,"北往南","國道五號南向13.3公里"],[24.958472,121.539182,90,"南往北","國道三號北向29.1公里"],[24.959269,121.324863,100,"西往東","國道二號東向18.5公里"],[24.962166,121.530685,90,"南往北","國道三號北向30.1公里"],[24.970085,121.92609,50,"南北雙向","宜蘭縣頭城鎮 台2線118k+49m大里段南下"],[24.970357,121.216665,100,"北往南","國道一號南向60.1公里"],[24.975257,121.456281,100,"北往南","國道三號南向39.3公里"],[24.976095,121.57083,90,"南往北","國道三號北向25公里"],[24.976428,121.574297,90,"北往南","國道三號南向24.6公里"],[24.977514,121.465516,100,"南往北","國道三號北向38.3公里"],[24.992198,121.592632,90,"北往南","國道三號南向21.8公里"],[24.994559,121.652551,80,"南往北","國道五號北向5.7公里"],[24.99567,121.282975,100,"西往東","國道二號東向11.8公里"],[25.005106,121.578561,80,"東往西","國道三號甲線西向3.4公里"],[25.010769,121.563365,80,"東往西","國道三號甲線西向1.7公里"],[25.01288,121.16468,100,"北往南","國道一號南向51.195公里"],[25.028276,121.251802,100,"東往西","國道二號西向6.4公里"],[25.029551,121.610569,90,"南往北","國道三號北向17.1公里"],[25.03426,121.24545,100,"北往南","國道一號南向35.56公里"],[25.03584,121.621922,40,"南往北","國道五號北向接國3南向南港系統公里"],[25.04396,121.30055,100,"北往南","國道一號南向26.8公里"],[25.046332,121.218629,100,"西往東","國道二號東向2.4公里"],[25.046878,121.625791,90,"南往北","國道三號北向14.5公里"],[25.049833,121.217197,100,"東往西","國道二號西向2公里"],[25.055336,121.402562,100,"南往北","國道一號北向37公里"],[25.060703,121.332635,100,"北往南","國道一號五楊南向44.6公里"],[25.063947,121.601696,100,"南往北","國道一號汐五北向16公里"],[25.064278,121.601444,100,"北往南","國道一號汐五南向16.1公里"],[25.065003,121.383882,100,"南往北","國道一號五楊北向38.8公里"],[25.065916,121.616437,100,"南往北","國道一號北向14.5公里"],[25.066258,121.423881,50,"南往北","國道一號北向34.4公里"],[25.066725,121.624945,100,"北往南","國道一號南向13.7公里"],[25.067222,121.424368,50,"北往南","國道一號南向34.4公里"],[25.07305,121.536862,100,"北往南","國道一號南向22.7公里"],[25.075502,121.471292,100,"北往南","國道一號汐五南向29.5公里"],[25.075938,121.466354,100,"北往南","國道一號南向30公里"],[25.078311,121.647484,90,"南往北","國道三號北向10.2公里"],[25.085808,121.680708,100,"南往北","國道一號北向7.5公里"],[25.106857,121.724738,100,"北往南","國道一號南向2公里"],[25.107764,121.725338,100,"南往北","國道一號北向1.9公里"],[25.110235,121.68526,90,"北往南","國道三號南向4.7公里"],[25.152981,121.732038,50,"南往北","臺2己線北向1.1公里"]];
+
+/* ---------- 3. 官方資料來源 ---------- */
+const SOURCES=[
+ {g:'國道',n:'國道公路固定式測速照相地點（國道公路警察局）',
+  d:'★ 高速公路專用。只提供 ZIP，下載後直接把 .zip 丟進「匯入檔案」即可，App 會自動解壓。欄位：設備編號/型式/縣市/行政區/設置地點/取締項目/座標緯度/座標經度/拍攝方向/速限',
+  u:'https://data.gov.tw/dataset/13940',
+  f:'https://www.tgos.tw/tgos/VirtualDir/Product/c2dd3a68-cafc-48fc-8a4a-7215ddc24cd3/1150720-國道公路固定式測速照相地點.zip'},
+ {g:'國道',n:'國道公路警察局 · 逕行舉發科學儀器設置地點',
+  d:'雪隧自動化科技執法、AI 違規偵測、篩選式動態地磅等公告（PDF/簡報，無座標，供人工核對）',
+  u:'https://www.hpb.npa.gov.tw/ch/app/data/list?module=wg160&id=2593',f:''},
+ {g:'省道/縣道',n:'測速執法設置點（警政署）',
+  d:'涵蓋各「縣」的省道、縣道與地方道路，UTF-8 CSV。注意：不含六都、也不含國道',
+  u:'https://data.gov.tw/dataset/7320',
+  f:'https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/EA5E6FCD-B82D-43B7-A5CF-E9893253187E/resource/DA356677-AEA0-44DE-9650-2CE630A27371/download'},
+ {g:'六都',n:'臺北市固定測速照相地點表',d:'143 筆，含區間測速，Big5 編碼 CSV',
+  u:'https://data.gov.tw/dataset/130111',
+  f:'https://data.taipei/api/dataset/745b8808-061f-4f5b-9a62-da1590c049a9/resource/5012e8ba-5ace-4821-8482-ee07c147fd0a/download'},
+ {g:'六都',n:'新北市政府資料開放平臺',d:'搜尋「測速」',u:'https://data.ntpc.gov.tw/datasets?q=測速',f:''},
+ {g:'六都',n:'桃園市政府資料開放平臺',d:'搜尋「測速」',u:'https://data.tycg.gov.tw/opendata/datalist?q=測速',f:''},
+ {g:'六都',n:'臺中市政府資料開放平臺',d:'搜尋「測速」',u:'https://opendata.taichung.gov.tw/search?q=測速',f:''},
+ {g:'六都',n:'臺南市政府資料開放平臺',d:'搜尋「測速」',u:'https://data.tainan.gov.tw/dataset?q=測速',f:''},
+ {g:'六都',n:'高雄市政府資料開放平臺',d:'測速照相桿／移動式測速地點',u:'https://data.kcg.gov.tw/dataset?q=測速',f:''},
+ {g:'路況',n:'TDX 運輸資料流通服務',d:'即時路況、事件、CCTV，需免費註冊金鑰',u:'https://tdx.transportdata.tw/',f:''},
+ {g:'路況',n:'1968 即時路況（高公局）',d:'國道即時路況與事件官方網站',u:'https://1968.freeway.gov.tw/',f:''}
+];
+
+/* ---------- 4. 幾何 ---------- */
+const R=6371000, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
+function dist(a,b,c,d){ // 公尺
+  const p=rad(a),q=rad(c),dp=rad(c-a),dl=rad(d-b);
+  const h=Math.sin(dp/2)**2+Math.cos(p)*Math.cos(q)*Math.sin(dl/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(h)));
+}
+function bearing(a,b,c,d){
+  const p=rad(a),q=rad(c),dl=rad(d-b);
+  const y=Math.sin(dl)*Math.cos(q), x=Math.cos(p)*Math.sin(q)-Math.sin(p)*Math.cos(q)*Math.cos(dl);
+  return (deg(Math.atan2(y,x))+360)%360;
+}
+const angDiff=(a,b)=>{ let d=Math.abs(a-b)%360; return d>180?360-d:d; };
+function destPoint(lat,lon,brg,m){
+  const p=rad(lat),l=rad(lon),t=rad(brg),dR=m/R;
+  const p2=Math.asin(Math.sin(p)*Math.cos(dR)+Math.cos(p)*Math.sin(dR)*Math.cos(t));
+  const l2=l+Math.atan2(Math.sin(t)*Math.sin(dR)*Math.cos(p),Math.cos(dR)-Math.sin(p)*Math.sin(p2));
+  return [deg(p2),(deg(l2)+540)%360-180];
+}
+
+/* ---------- 5. 方向字串 → 允許航向 ---------- */
+const DIR_TOL=62;
+function dirHeadings(s){
+  if(!s) return null;
+  s=String(s);
+  const set=[];
+  const has=t=>s.indexOf(t)>=0;
+  if(has('南北雙向')||has('南北向')) set.push(0,180);
+  if(has('東西雙向')||has('東西向')) set.push(90,270);
+  if(has('北上')||has('南往北')||has('北向')) set.push(0);
+  if(has('南下')||has('北往南')||has('南向')) set.push(180);
+  if(has('西往東')||has('東向')) set.push(90);
+  if(has('東往西')||has('西向')) set.push(270);
+  return set.length? Array.from(new Set(set)) : null; // null = 不限方向
+}
+function dirMatch(cam,heading){
+  if(!CFG.dirFilter) return true;
+  if(heading==null||isNaN(heading)) return true;
+  const hs=cam.hd;
+  if(!hs) return true;
+  return hs.some(h=>angDiff(h,heading)<=DIR_TOL);
+}
+
+/* ---------- 6. 資料庫 ---------- */
+let CAMS=[];               // {id,lat,lon,lim,dir,hd,name,src,sec}
+/* PACKS：可疊加的資料來源。國道、六都、各縣可以各自匯入後合併。
+   舊版單一 IMPORTED 會自動搬遷過來。 */
+let PACKS=Store.get(K('packs'),null);
+if(!PACKS){
+  PACKS=[];
+  const legacy=Store.get(K('imported'),null);
+  if(legacy&&legacy.length){ PACKS.push({id:'legacy',name:'先前匯入的資料',rows:legacy,t:Date.now()}); }
+  Store.del(K('imported'));
+  Store.set(K('packs'),PACKS);
+}
+const savePacks=()=>{ try{ Store.set(K('packs'),PACKS); }
+  catch(e){ toast('資料量太大，無法保存到這台裝置（本次仍可使用）',5000); } };
+let REPORTS=Store.get(K('reports'),[]);
+let BROADCASTS=Store.get(K('bc'),[]);
+let TRAFFIC=[];            // TDX 抓回來的即時事件
+
+function mkCam(lat,lon,lim,dir,name,src){
+  return {id:src[0]+'_'+lat.toFixed(5)+'_'+lon.toFixed(5),lat,lon,lim:lim||0,dir:dir||'',
+          hd:dirHeadings(dir),name:name||'測速點',src,sec:/區間/.test(dir||'')||/區間/.test(name||'')};
+}
+function rebuildDB(){
+  const out=[], seen=new Set();
+  let dupes=0;
+  const push=c=>{ const k=c.lat.toFixed(5)+','+c.lon.toFixed(5)+','+c.dir;
+                  if(seen.has(k)){ dupes++; return; } seen.add(k); out.push(c); };
+  /* 匯入的來源先進，內建的後進 —— 座標重複時保留匯入的那一筆（比較新、比較權威）。
+     內建資料預設「保留」而不是「一匯入就停用」。
+     原本的行為是：只要匯入任何一個檔案，內建的 176 個國道點就整批停用。
+     使用者為了補自己縣市的縣道而匯入一份 CSV，結果整條國道的警示都沒了，
+     而且只有一個 4 秒就消失的提示 —— 這種靜默的功能倒退最難察覺。
+     現在改成可以在「資料」頁自己關掉。 */
+  PACKS.forEach(p=>{ p.rows.forEach(r=>push(mkCam(r[0],r[1],r[2],r[3],r[4],'pack:'+p.id))); });
+  if(CFG.useSeed!==false) SEED.forEach(r=>push(mkCam(r[0],r[1],r[2],r[3],r[4],'seed')));
+  REPORTS.filter(r=>r.kind==='測速點'||r.kind==='科技執法'||r.kind==='臨檢')
+         .forEach(r=>push(mkCam(r.lat,r.lon,r.lim,'',r.kind+(r.note?' · '+r.note:''),'user')));
+  CAMS=out;
+  const nSeed = CFG.useSeed!==false ? 1 : 0;
+  const label = PACKS.length? (PACKS.length+nSeed)+' 個來源' : (nSeed?'內建示範':'無來源');
+  el('dbStat').textContent=CAMS.length+' 點（'+label+(dupes?'，已去重 '+dupes:'')+'）';
+  el('lDb').textContent=CAMS.length+' 點';
+  el('dDb').className='dot '+(CAMS.length?'on':'err');
+  renderPacks();
+  renderCoverage();
+  drawCamLayer();
+  if(typeof buildKmAnchors==='function') buildKmAnchors();
+}
+
+/* ── 縣市覆蓋 ──────────────────────────────────────────────
+   實地測試時遇到的問題：開在縣道上完全沒有警示，看起來像程式壞了，
+   其實是那個縣市根本沒有任何點位。畫面上只寫「315 點」，
+   完全看不出來涵蓋範圍只有宜蘭和新竹。
+   所以這裡把「哪些縣市有資料、各幾點」直接列出來。 */
+const COUNTIES=['臺北市','新北市','桃園市','臺中市','臺南市','高雄市','基隆市','新竹市','新竹縣',
+                '苗栗縣','彰化縣','南投縣','雲林縣','嘉義市','嘉義縣','屏東縣','宜蘭縣','花蓮縣',
+                '臺東縣','澎湖縣','金門縣','連江縣'];
+/** 從點位名稱判斷縣市。名稱裡沒寫縣市的（例如國道）回傳 null。 */
+function countyOf(name){
+  if(!name) return null;
+  const s=String(name).replace(/台/g,'臺');
+  for(const c of COUNTIES) if(s.includes(c)) return c;
+  // 有些資料只寫「臺北」不寫「市」
+  for(const c of COUNTIES){ const short=c.slice(0,-1); if(s.includes(short)) return c; }
+  return null;
+}
+function coverage(){
+  const by={}; let 國道=0, 未知=0;
+  for(const c of CAMS){
+    const n=c.name||'';
+    if(/國道|國\d/.test(n)&&!countyOf(n)){ 國道++; continue; }
+    const k=countyOf(n);
+    if(k) by[k]=(by[k]||0)+1; else 未知++;
+  }
+  return {by,國道,未知,缺:COUNTIES.filter(c=>!by[c])};
+}
+function renderCoverage(){
+  const box=el('covList'); if(!box) return;
+  const {by,國道,未知,缺}=coverage();
+  const have=COUNTIES.filter(c=>by[c]).sort((a,b)=>by[b]-by[a]);
+  let h='';
+  if(國道) h+=`<div class="item"><div class="t">🛣️ 國道（全線）</div><div class="m">${國道} 點 · 不分縣市</div></div>`;
+  h+= have.length
+    ? '<div class="covgrid">'+have.map(c=>`<span class="covok">${c} <b>${by[c]}</b></span>`).join('')+'</div>'
+    : '<div class="empty">目前沒有任何縣市道路的點位</div>';
+  if(缺.length) h+=`<div class="covmiss"><b>⛔ 完全沒有點位的縣市（${缺.length}）</b><br>${缺.join('、')}</div>`;
+  if(未知) h+=`<div class="hint" style="margin-top:6px">另有 ${未知} 點無法從名稱判斷縣市（仍會正常警示）</div>`;
+  box.innerHTML=h;
+}
+function renderPacks(){
+  const box=el('packList'); if(!box) return;
+  box.innerHTML = PACKS.length ? PACKS.map(p=>
+    `<div class="item"><div class="t">${esc(p.name)}</div>
+      <div class="m">${p.rows.length} 點 · ${new Date(p.t).toLocaleDateString('zh-TW')}
+      <button class="btn sm" data-rmpack="${esc(p.id)}" style="float:right;margin-top:-4px">移除</button></div></div>`).join('')
+    : '';
+  const on = CFG.useSeed!==false;
+  box.innerHTML += `<div class="item"><div class="t">📦 內建資料${on?'':'（已關閉）'}</div>
+      <div class="m">國道全線 176 點 + 宜蘭／新竹縣道 139 點
+      <button class="btn sm" data-seedtoggle="1" style="float:right;margin-top:-4px">${on?'關閉':'開啟'}</button></div></div>`;
+  if(!PACKS.length&&!on) box.innerHTML+='<div class="empty">目前沒有任何點位，不會有警示</div>';
+}
+
+/* ---------- 7. DOM 工具 ---------- */
+const el=id=>document.getElementById(id);
+let toastT;
+function toast(m,ms){ const t=el('toast'); t.textContent=m; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),ms||2600); }
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- 8. 音訊 / 語音 ---------- */
+const Audio_=(function(){
+  let ctx=null, unlocked=false, zhVoice=null;
+  function pickVoice(){
+    try{ const vs=speechSynthesis.getVoices()||[];
+      zhVoice = vs.find(v=>/zh[-_]TW/i.test(v.lang)) || vs.find(v=>/zh[-_]HK/i.test(v.lang))
+             || vs.find(v=>/^zh/i.test(v.lang)) || null; }catch(e){}
+  }
+  try{ speechSynthesis.onvoiceschanged=pickVoice; pickVoice(); }catch(e){}
+  return {
+    unlock(){
+      try{ ctx=ctx||new (window.AudioContext||window.webkitAudioContext)(); if(ctx.state==='suspended')ctx.resume(); }catch(e){}
+      try{ const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u); }catch(e){}
+      pickVoice(); unlocked=true;
+      el('dVoice').className='dot '+(('speechSynthesis' in window)?'on':'err');
+    },
+    beep(freq,dur,vol){
+      if(!CFG.beep||!ctx) return;
+      try{ const o=ctx.createOscillator(), g=ctx.createGain();
+        o.type='square'; o.frequency.value=freq; g.gain.value=vol||.09;
+        o.connect(g); g.connect(ctx.destination); o.start();
+        g.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+(dur||.16));
+        o.stop(ctx.currentTime+(dur||.16)+.02);
+      }catch(e){}
+    },
+    say(txt){
+      if(!CFG.voice) return false;
+      if(Native.hasTTS&&Native.speak(txt)) return true;   // 原生語音（背景也唸得出來）
+      if(!('speechSynthesis' in window)) return false;
+      try{ speechSynthesis.cancel();
+        const u=new SpeechSynthesisUtterance(txt);
+        u.lang='zh-TW'; u.rate=1.05; u.pitch=1;
+        if(zhVoice) u.voice=zhVoice;
+        speechSynthesis.speak(u); return true;
+      }catch(e){ return false; }
+    },
+    vibe(pat){ if(!CFG.vibe) return; try{ navigator.vibrate&&navigator.vibrate(pat); }catch(e){} }
+  };
+})();
+
+/* ---------- 9. 警示引擎 ---------- */
+const REACT=[20,12,6];          // 三級各自的「反應秒數」
+const state=new Map();          // camId -> 已觸發到第幾級
+let lastAlertAt=0;
+
+function tierDist(tier,speedMps){
+  const base=[CFG.t1,CFG.t2,CFG.t3][tier-1];
+  const v=speedMps||0;
+  let d=Math.max(base, v*REACT[tier-1]);
+  /* 定位更新間隔的補償。
+     時速 100 每秒走 28 公尺：1 秒更新一次，三個級距都踩得到；
+     但更新間隔拉到 20 秒就是一步 556 公尺 —— 比整個第一級警示窗還寬，
+     於是「上一筆還在 667 公尺外，下一筆已經剩 113 公尺」，只來得及響一次，
+     而且是開到眼前才響。
+     所以把預告窗撐開到至少涵蓋「一次更新會走的距離」。定位正常時
+     gap≈1 秒，補償只有 28 公尺，等於沒作用；定位很慢時才會明顯放寬。
+     第 3 級不補償 —— 它的意思是「就在這裡」，提早喊會失去意義。 */
+  if(tier<3){
+    const gap=Math.min(medGap(),30);
+    d += v*gap*(tier===1?1:0.5);
+  }
+  return d;
+}
+/** 最近幾次定位的間隔中位數（秒）。還沒有樣本時回傳 0，等於不補償。 */
+function medGap(){
+  const g=GPSQ&&GPSQ.gaps;
+  if(!g||g.length<3) return 0;
+  const s=g.slice().sort((a,b)=>a-b);
+  return s[Math.floor(s.length/2)]||0;
+}
+
+/**
+ * 這一步「掃過」了測速點多近？
+ *
+ * 只看目前這一個點的距離是不夠的。定位每秒更新時，時速 100 一步只走 28 公尺，
+ * 每一級警示窗都踩得到；但只要更新間隔拉長（訊號中斷、隧道、筆電的 Wi-Fi 定位），
+ * 一步就可能跳 500 公尺 —— 直接跨過整個警示窗，於是「明明開過去了卻沒響」。
+ *
+ * 所以改成算「上一個定位點到這個定位點的線段」離測速點多近。只要真的開過去，
+ * 不管中間漏掉幾筆定位，至少會響一次。
+ */
+function sweptDist(pos,cam,d){
+  const pv=pos.prev;
+  if(!pv) return d;
+  const dt=(pos.t-pv.t)/1000;
+  // 間隔太久的兩點之間可能根本不是直線（下交流道、繞路），不要硬連
+  if(dt>30) return d;
+  const jump=dist(pv.lat,pv.lon,pos.lat,pos.lon);
+  // 位置瞬移（定位跳點、關掉又打開、切換定位來源）不是真的開過去。
+  // 把它當成線段會憑空「掃過」一整排測速點，然後把它們的狀態鎖成已警示過，
+  // 之後真的開到時反而完全不出聲 —— 比漏報更難查。
+  if(dt<=0||jump/Math.max(dt,0.001)>SPD_MAX) return d;
+  const s=segNearest(cam.lat,cam.lon,[pv.lat,pv.lon],[pos.lat,pos.lon]);
+  return Math.min(d,s.d);
+}
+
+function evaluate(pos){
+  const {lat,lon,heading,speed}=pos;
+  const v=speed||0;                      // m/s
+  const far=Math.max(tierDist(1,v)*1.6,1200);
+  // 粗篩視窗依 far 動態計算（1 緯度≈111.3km；經度依緯度收縮）
+  const dLat=far/111320*1.15, dLon=far/(111320*Math.max(0.2,Math.cos(rad(lat))))*1.15;
+  let best=null;
+
+  // 航向只有在「可信」時才拿來過濾。Wi-Fi 定位飄移推算出來的航向是隨機的，
+  // 拿它過濾會把正確的測速點濾掉，變成整趟安靜 —— 寧可多報也不要漏報。
+  const hd = pos.headingOk===false ? null : heading;
+
+  for(const c of CAMS){
+    if(Math.abs(c.lat-lat)>dLat||Math.abs(c.lon-lon)>dLon) { state.delete(c.id); continue; }
+    const d0=dist(lat,lon,c.lat,c.lon);
+    const d=sweptDist(pos,c,d0);          // 這一步「掃過」的最近距離
+    if(d>far){ state.delete(c.id); continue; }
+    if(!dirMatch(c,hd)){ state.delete(c.id); continue; }
+    // 必須在前方（有可信航向時），±85° 視為前方。
+    // 但如果這一步是「掃過去」的（d 明顯小於目前距離），代表我們就是從它旁邊
+    // 開過去的，這時不能因為它現在落在後方就靜音 —— 那正是漏報的情形。
+    if(hd!=null&&!isNaN(hd)&&v>1.5&&d0-d<25){
+      const brg=bearing(lat,lon,c.lat,c.lon);
+      if(angDiff(brg,hd)>85){ state.delete(c.id); continue; }
+    }
+    // 距離相同時（例如同一位置同時有點測與區間），優先提示區間測速
+    if(!best || d < best.d-1 || (Math.abs(d-best.d)<=1 && c.sec && !best.cam.sec)) best={cam:c,d,d0};
+  }
+
+  if(!best){ paintAlert(null); return null; }
+
+  const {cam,d,d0}=best;
+  // 級距用「掃過的最近距離」判斷（才不會整個跨過去），
+  // 但唸出來的距離要用真實的目前距離，不然會唸出一個已經不對的數字。
+  let tier=0;
+  if(d<=tierDist(3,v)) tier=3; else if(d<=tierDist(2,v)) tier=2; else if(d<=tierDist(1,v)) tier=1;
+  const prev=state.get(cam.id)||0;
+
+  if(tier>prev&&tier>0){
+    const kmh=Math.round(v*3.6);
+    // 車速不可信就不做超速判定（也不會因為「沒超速」而被靜音）
+    const over=cam.lim>0&&kmh>cam.lim+2&&pos.speedOk!==false;
+    const quiet=CFG.onlyOver&&!over&&tier<3&&pos.speedOk!==false;
+    // 只有「真的播出去」或「刻意靜音」才推進狀態；被節流時保留，下一輪再補播
+    if(quiet||announce(cam,d0,tier,over,kmh,pos.speedOk!==false)) state.set(cam.id,tier);
+  }
+  paintAlert({cam,d:d0,tier,v});
+  return best;
+}
+
+function announce(cam,d,tier,over,kmh,speedOk){
+  const now=Date.now();
+  // 節流：避免連續兩個點位或跳級時語音互相蓋掉。第 3 級屬緊急，節流放寬。
+  if(now-lastAlertAt < (tier===3?450:1100)) return false;
+  lastAlertAt=now;
+  const dm=d<1000? Math.round(d/10)*10+'公尺' : (d/1000).toFixed(1)+'公里';
+  const kind=cam.sec?'區間測速':'測速照相';
+  let txt;
+  if(tier===1) txt=`前方${dm}，${kind}`+(cam.lim?`，速限${cam.lim}`:'');
+  else if(tier===2) txt=`注意，${dm}${kind}`+(cam.lim?`，速限${cam.lim}`:'');
+  else txt=`${kind}${cam.lim?`，速限${cam.lim}`:''}`+(over?`，你目前${kmh}，請減速`:'');
+  // 車速不可信時絕對不要唸「你目前 XXX，請減速」—— 唸出 14004 這種數字
+  // 會讓人完全不信任這個 App。上面的 over 已由呼叫端把關，這裡再保險一次。
+  if(speedOk===false) txt=txt.replace(/，你目前\d+，請減速/,'');
+  Audio_.say(txt);
+  if(tier===1){ Audio_.beep(660,.14); Audio_.vibe(80); }
+  if(tier===2){ Audio_.beep(880,.16); Audio_.vibe([90,60,90]); }
+  if(tier===3){ Audio_.beep(1180,.22,.13); Audio_.vibe([140,70,140,70,180]); }
+  return true;
+}
+
+function paintAlert(a){
+  const box=el('alertBox'), badge=el('limitBadge');
+  box.className='';
+  if(!a){
+    el('alertIcon').textContent='🛡️';
+    el('alertLabel').textContent= CAMS.length? '前方無測速點' : '尚未載入點位';
+    el('alertSub').textContent= GPS.ok? '監控中 · 資料庫 '+CAMS.length+' 點' : '等待 GPS 定位…';
+    el('alertDist').textContent=''; badge.classList.add('off'); badge.textContent='--';
+    el('hudBarFill').style.width='0'; return;
+  }
+  const {cam,d,tier,v}=a;
+  box.className= tier? 't'+tier : '';
+  el('alertIcon').textContent= cam.sec?'📏' : (tier===3?'🚨':tier===2?'⚠️':'📷');
+  el('alertLabel').textContent= cam.sec?'區間測速':'測速照相';
+  el('alertDist').textContent= d<1000? Math.round(d)+'m' : (d/1000).toFixed(1)+'km';
+  el('alertSub').textContent= cam.name + (cam.dir?' · '+cam.dir:'');
+  if(cam.lim>0){ badge.classList.remove('off'); badge.textContent=cam.lim;
+    const kmh=v*3.6; badge.style.borderColor = kmh>cam.lim+2? 'var(--danger)':'#2fd07a'; }
+  else { badge.classList.add('off'); badge.textContent='--'; }
+  const span=tierDist(1,v)*1.6;
+  el('hudBarFill').style.width=Math.max(0,Math.min(100,(1-d/span)*100))+'%';
+  el('hudBarFill').style.background= tier===3?'var(--danger)':tier===2?'var(--warn)':'var(--info)';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   9b. 原生橋接（Capacitor）
+   打包成 App 之後才會有 window.Capacitor。有的話就改用：
+     · 背景定位  → 關螢幕、切到別的 App 仍持續收位置與警示
+     · 原生語音  → 背景播報比瀏覽器 TTS 穩定
+   在一般瀏覽器裡這整段不會啟用，自動退回原本的實作。
+   ═══════════════════════════════════════════════════════════ */
+const Native=(function(){
+  const cap=()=>window.Capacitor;
+  const has=n=>{ try{ return !!(cap()&&cap().isNativePlatform&&cap().isNativePlatform()
+                       &&cap().Plugins&&cap().Plugins[n]); }catch(e){ return false; } };
+  const plugin=n=>cap().Plugins[n];
+  return {
+    get isNative(){ try{ return !!(cap()&&cap().isNativePlatform&&cap().isNativePlatform()); }catch(e){ return false; } },
+    get hasBgGeo(){ return has('BackgroundGeolocation'); },
+    get hasTTS(){ return has('TextToSpeech'); },
+    platform(){ try{ return cap()?cap().getPlatform():'web'; }catch(e){ return 'web'; } },
+
+    /** 背景定位。回傳 watcher id 供停止用。 */
+    async watchPosition(onOk,onErr,opts){
+      opts=opts||{};
+      const id=await plugin('BackgroundGeolocation').addWatcher({
+        backgroundMessage: opts.saving? '省電中 · 偵測到行駛會自動恢復'
+                                      : '鹿豹持續在背景提醒你前方的測速與掉落物',
+        backgroundTitle: opts.saving? '鹿豹 · 省電待命' : '鹿豹 · 行車警示中',
+        requestPermissions: opts.requestPermissions!==false,
+        stale:false,
+        // 一般模式移動 8 公尺回報一次；省電模式拉到 250 公尺，GPS 幾乎不動作
+        distanceFilter: opts.saving? 250 : 8
+      },(loc,err)=>{
+        if(err){ onErr(err); return; }
+        if(loc) onOk(loc);
+      });
+      return id;
+    },
+    async clearWatcher(id){ try{ await plugin('BackgroundGeolocation').removeWatcher({id}); }catch(e){} },
+
+    speak(text){
+      if(!has('TextToSpeech')) return false;
+      try{
+        plugin('TextToSpeech').stop().catch(()=>{});
+        plugin('TextToSpeech').speak({text,lang:'zh-TW',rate:1.05,pitch:1.0,
+          category:'playback'}).catch(()=>{});    // playback 讓背景也發得出聲音
+        return true;
+      }catch(e){ return false; }
+    }
+  };
+})();
+
+/* ═══════════════════════════════════════════════════════════
+   9c. 省電
+   背景定位很吃電。停紅燈、休息站、到家忘了關 —— 這些情況下
+   沒必要維持 8 公尺一次的高頻定位。
+   靜止超過設定時間就降頻（原生把 distanceFilter 拉到 250 公尺、
+   換掉通知文字、放掉螢幕鎖），偵測到真的在移動就立刻恢復。
+   ═══════════════════════════════════════════════════════════ */
+const POWER={saving:false,stillSince:null,anchorLat:null,anchorLon:null,switching:false};
+
+function powerReset(){ POWER.stillSince=null; POWER.anchorLat=null; POWER.anchorLon=null; }
+
+/** 每次定位更新後呼叫，決定要不要進入／離開省電 */
+function powerTick(pos){
+  if(!CFG.powerSave){ if(POWER.saving) powerExit(); return; }
+  // 定位凍住（Wi-Fi 快取沒更新）不是「停車」。以前這裡會誤判成靜止而進入
+  // 省電模式，於是整趟都不出聲、也不告訴使用者為什麼 —— 實地測試踩到的坑。
+  if(GPSQ.frozen>=3||GPSQ.level==='unusable'){ if(POWER.saving) powerExit(); return; }
+  const v=((pos.speedOk===false?0:pos.speed)||0)*3.6, now=Date.now();
+  // 判定「還在動」：時速 > 4，或離開上次錨點超過 80 公尺
+  let moving = v>4;
+  if(!moving&&POWER.anchorLat!=null){
+    if(dist(POWER.anchorLat,POWER.anchorLon,pos.lat,pos.lon)>80) moving=true;
+  }
+  if(moving){
+    powerReset();
+    POWER.anchorLat=pos.lat; POWER.anchorLon=pos.lon;
+    if(POWER.saving) powerExit();
+    return;
+  }
+  if(POWER.anchorLat==null){ POWER.anchorLat=pos.lat; POWER.anchorLon=pos.lon; }
+  if(POWER.stillSince==null) POWER.stillSince=now;
+  if(!POWER.saving && now-POWER.stillSince > CFG.powerAfterMin*60e3) powerEnter();
+}
+
+async function powerEnter(){
+  if(POWER.saving||POWER.switching) return;
+  POWER.switching=true; POWER.saving=true;
+  el('powerTag').classList.remove('hidden');
+  el('lGps').textContent='省電待命';
+  await wakeRelease();          // 停車 5 分鐘以上才會走到這裡，讓螢幕休息
+  if(GPS.native&&GPS.watch!=null){
+    try{
+      await Native.clearWatcher(GPS.watch);
+      // 重新註冊時不要再跳權限對話框
+      GPS.watch=await Native.watchPosition(
+        loc=>{ if(!SIM) onPos(loc.latitude,loc.longitude,loc.bearing,loc.speed,loc.accuracy,false); },
+        e=>{},
+        {saving:true,requestPermissions:false});
+    }catch(e){}
+  }
+  POWER.switching=false;
+  toast('已進入省電模式（靜止超過 '+CFG.powerAfterMin+' 分鐘），開始行駛會自動恢復',4000);
+}
+
+async function powerExit(){
+  if(!POWER.saving||POWER.switching) return;
+  POWER.switching=true; POWER.saving=false;
+  el('powerTag').classList.add('hidden');
+  el('lGps').textContent= GPS.native? '背景定位中' : 'GPS 已定位';
+  if(GPS.native&&GPS.watch!=null){
+    try{
+      await Native.clearWatcher(GPS.watch);
+      GPS.watch=await Native.watchPosition(
+        loc=>{ if(!SIM) onPos(loc.latitude,loc.longitude,loc.bearing,loc.speed,loc.accuracy,false); },
+        e=>{ el('dGps').className='dot err'; },
+        {saving:false,requestPermissions:false});
+    }catch(e){}
+  }
+  if(CFG.wake) requestWake();
+  POWER.switching=false;
+  toast('偵測到行駛，已恢復完整警示');
+}
+
+/* ---------- 10. 定位 ---------- */
+const GPS={ok:false,watch:null,last:null,wakeLock:null,native:false};
+let SIM=null;
+
+/* ═══════════════════════════════════════════════════════════
+   10a. 定位品質偵測
+
+   實地測試發現的問題：在筆電上跑完全沒有用，但畫面看起來一切正常
+   —— 這是最糟的一種壞法。原因是筆電沒有 GPS 晶片，瀏覽器改用
+   Wi-Fi / IP 推估位置，特徵是：
+
+     coords.speed   = null      沒有硬體測速
+     coords.heading = null      沒有硬體航向
+     coords.accuracy = 幾百~幾千公尺
+     更新間隔 10~30 秒，位置一次跳好幾百公尺，有時整個凍住
+
+   時速 100 每 20 秒就是 556 公尺 —— 比整個第一級警示窗（600 公尺）
+   還大，一步就跨過去，警示自然不會響。
+
+   所以這裡持續量測定位品質，並在不堪用時「明講」，而不是安靜地假裝在工作。
+   ═══════════════════════════════════════════════════════════ */
+const GPSQ={
+  gaps:[],            // 最近的更新間隔（秒）
+  accs:[],            // 最近的精度（公尺）
+  hwSpeed:0, hwHead:0, samples:0,   // 硬體有給速度／航向的次數
+  frozen:0,           // 連續拿到「一模一樣座標」的次數
+  level:'unknown',    // good | poor | unusable | unknown
+  reason:'',
+};
+const med=a=>{ if(!a.length) return null; const s=a.slice().sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
+
+function gpsSample(lat,lon,heading,speed,acc,t){
+  const L=GPS.last;
+  if(L&&L.t){
+    GPSQ.gaps.push((t-L.t)/1000); if(GPSQ.gaps.length>12) GPSQ.gaps.shift();
+    // 座標完全沒變 = 快取沒更新（真 GPS 就算停車也會有幾公尺抖動）
+    if(L.lat===lat&&L.lon===lon) GPSQ.frozen++; else GPSQ.frozen=0;
+  }
+  if(acc!=null&&isFinite(acc)){ GPSQ.accs.push(acc); if(GPSQ.accs.length>12) GPSQ.accs.shift(); }
+  GPSQ.samples++;
+  if(speed!=null&&!isNaN(speed)) GPSQ.hwSpeed++;
+  if(heading!=null&&!isNaN(heading)) GPSQ.hwHead++;
+  return gpsGrade();
+}
+
+function gpsGrade(){
+  const n=GPSQ.samples;
+  if(n<3){ GPSQ.level='unknown'; GPSQ.reason=''; return GPSQ; }
+  const acc=med(GPSQ.accs), gap=med(GPSQ.gaps);
+  const 有硬體速度=GPSQ.hwSpeed/n>0.5;
+  const rs=[];
+  let lv='good';
+  // 精度：行車警示要判斷 100 公尺級距，誤差超過 50 公尺就已經很勉強
+  if(acc!=null&&acc>150){ lv='unusable'; rs.push('定位誤差 ±'+Math.round(acc)+' 公尺'); }
+  else if(acc!=null&&acc>50){ if(lv==='good') lv='poor'; rs.push('定位誤差 ±'+Math.round(acc)+' 公尺'); }
+  // 更新間隔：時速 100 每秒 28 公尺，超過 5 秒就會跨過警示窗
+  if(gap!=null&&gap>8){ lv='unusable'; rs.push('每 '+Math.round(gap)+' 秒才更新一次'); }
+  else if(gap!=null&&gap>3){ if(lv==='good') lv='poor'; rs.push('每 '+gap.toFixed(1)+' 秒更新一次'); }
+  if(!有硬體速度){ if(lv==='good') lv='poor'; rs.push('裝置沒有提供車速（需靠位置推算）'); }
+  if(GPSQ.frozen>=3){ lv='unusable'; rs.push('位置已停止更新'); }
+  GPSQ.level=lv; GPSQ.reason=rs.join('、');
+  return GPSQ;
+}
+
+function gpsResetQuality(){
+  GPSQ.gaps=[]; GPSQ.accs=[]; GPSQ.hwSpeed=0; GPSQ.hwHead=0;
+  GPSQ.samples=0; GPSQ.frozen=0; GPSQ.level='unknown'; GPSQ.reason='';
+}
+
+function paintGpsWarn(simulated){
+  const box=el('gpsWarn'); if(!box) return;
+  if(simulated||GPSQ.level==='good'||GPSQ.level==='unknown'){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const bad=GPSQ.level==='unusable';
+  box.className='gpswarn '+(bad?'bad':'warn');
+  el('gpsWarnTitle').textContent= bad? '⛔ 這台裝置的定位不足以做行車警示'
+                                     : '⚠️ 定位品質不佳，警示可能不準';
+  el('gpsWarnBody').textContent= GPSQ.reason +
+    (bad? '。筆電／桌機沒有 GPS 晶片，是用 Wi-Fi 估算位置 —— 請改用手機測試。' : '。');
+}
+
+/* 推算速度時的防護值 */
+const SPD_MAX=61;          // m/s ≈ 220 km/h，超過一定是定位跳動
+const SPD_MIN_DT=0.4;      // 間隔太短，位置雜訊會被放大成假車速
+const SPD_MAX_DT=12;       // 間隔太長，中間可能加減速過，推算沒有意義
+
+/**
+ * 從前後兩點推算速度。回傳 null 代表「這一筆不可信」——
+ * 寧可顯示 --，也不要顯示 14004 km/h 然後拿它去算警示距離。
+ */
+function deriveSpeed(prev,lat,lon,acc,t){
+  if(!prev||!prev.t) return null;
+  const dt=(t-prev.t)/1000;
+  if(dt<SPD_MIN_DT||dt>SPD_MAX_DT) return null;
+  const dd=dist(prev.lat,prev.lon,lat,lon);
+  // 位移必須明顯大於定位誤差，否則只是誤差在飄，不是真的在動
+  const noise=Math.max(6,(acc||0)*0.7);
+  if(dd<noise) return 0;
+  const v=dd/dt;
+  if(!isFinite(v)||v>SPD_MAX) return null;
+  // 平滑：跟上一次的推算值做指數移動平均，壓掉單點跳動
+  const pv=(prev.speed!=null&&isFinite(prev.speed))?prev.speed:v;
+  return pv*0.6+v*0.4;
+}
+
+function onPos(lat,lon,heading,speed,acc,simulated){
+  const now=Date.now();
+  const q=simulated?GPSQ:gpsSample(lat,lon,heading,speed,acc,now);
+  const p={lat,lon,heading,speed,acc};
+  const L=GPS.last;
+  // 沒有硬體 heading 時用前後兩點推算。位移必須大於定位誤差，
+  // 否則 Wi-Fi 定位的飄移會產生完全隨機的航向，方向過濾就會把
+  // 正確的測速點濾掉 —— 這是「明明有點位卻整趟不出聲」的元凶之一。
+  p.headingHw = heading!=null&&!isNaN(heading);
+  if(!p.headingHw&&L){
+    const dd=dist(L.lat,L.lon,lat,lon);
+    const need=Math.max(12,(acc||0)*0.8);
+    if(dd>need){ p.heading=bearing(L.lat,L.lon,lat,lon); p.headingOk=true; }
+    else { p.heading=L.heading; p.headingOk=!!L.headingOk; }
+  } else p.headingOk=p.headingHw;
+
+  p.speedHw = speed!=null&&!isNaN(speed);
+  if(!p.speedHw){
+    const v=deriveSpeed(L,lat,lon,acc,now);
+    // 推不出可信值時保留上一次的，但標記成不可信，畫面顯示 --
+    if(v==null){ p.speed=L?L.speed:null; p.speedOk=false; }
+    else { p.speed=v; p.speedOk=true; }
+  } else p.speedOk=true;
+
+  p.t=now;
+  p.prev=L?{lat:L.lat,lon:L.lon,t:L.t}:null;
+  if(L) KM.odo+=dist(L.lat,L.lon,lat,lon);
+  GPS.last=p; GPS.ok=true;
+  const lv=simulated?'good':GPSQ.level;
+  el('dGps').className='dot '+(simulated?'sim':(lv==='unusable'?'err':lv==='poor'?'warn':'on'));
+  el('lGps').textContent= simulated?'模擬定位'
+    : lv==='unusable'?'定位不堪用' : lv==='poor'?'定位品質不佳' : 'GPS 已定位';
+  el('accTag').textContent= acc? '±'+Math.round(acc)+'m' : '';
+  // 不可信就顯示 --。顯示一個假數字比顯示「不知道」更糟，
+  // 因為使用者會拿它判斷自己有沒有超速。
+  el('spd').textContent= (p.speed!=null&&p.speedOk)? Math.round(p.speed*3.6) : '--';
+  paintGpsWarn(simulated);
+  powerTick(p);
+  probeTick(p);
+  evaluate(p);
+  updateTrip(p);
+  paintSecRow();
+  paintHazRow(evaluateHazards(p));
+  updateMapPos(p);
+  drawRadar(p);
+  // 開著的分頁才即時重繪；省電模式下連這個都跳過
+  if(!POWER.saving){
+    if(el('v-report').classList.contains('active')) renderKm();
+    if(el('v-trip').classList.contains('active')) renderTrip();
+  }
+  // 自動接收附近回報（每 3 分鐘）
+  if(CFG.hazAuto&&CFG.hazUrl&&Date.now()-(CFG.hazLast||0)>18e4&&!simulated) pullHazards(p,true);
+}
+
+function startGPS(){
+  // 打包成 App：用背景定位，關螢幕也持續
+  if(Native.hasBgGeo){
+    Native.watchPosition(loc=>{
+      if(SIM) return;
+      onPos(loc.latitude,loc.longitude,loc.bearing,loc.speed,loc.accuracy,false);
+    },e=>{
+      el('dGps').className='dot err';
+      const msg=String(e&&(e.message||e.code)||e);
+      el('lGps').textContent=/denied|permission/i.test(msg)?'定位權限被拒':'背景定位失敗';
+      toast(/denied|permission/i.test(msg)
+        ? '請到系統設定把定位權限改成「永遠允許」，否則關螢幕就不會警示'
+        : '背景定位失敗：'+msg,6000);
+    }).then(id=>{ GPS.watch=id; GPS.native=true;
+      el('lGps').textContent='背景定位中'; el('dGps').className='dot on';
+    }).catch(e=>{ GPS.native=false; startWebGPS(); });
+    if(CFG.wake) requestWake();
+    return;
+  }
+  startWebGPS();
+}
+
+function startWebGPS(){
+  if(!navigator.geolocation){ toast('此瀏覽器不支援定位'); el('dGps').className='dot err'; return; }
+  try{
+    GPS.watch=navigator.geolocation.watchPosition(
+      g=>{ if(SIM) return; const c=g.coords;
+           onPos(c.latitude,c.longitude,c.heading,c.speed,c.accuracy,false); },
+      e=>{ el('dGps').className='dot err';
+           el('lGps').textContent= e.code===1?'定位權限被拒':'定位失敗';
+           toast(e.code===1?'請在瀏覽器設定允許定位權限':'定位失敗：'+e.message,4000); },
+      {enableHighAccuracy:true,maximumAge:1000,timeout:20000});
+  }catch(e){ el('dGps').className='dot err'; }
+  if(CFG.wake) requestWake();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   10c. 螢幕常亮（Wake Lock）
+
+   原本的寫法有三個問題，實際用起來就是「有時候會亮、有時候不會，
+   而且看不出來為什麼」：
+
+     1. visibilitychange 的監聽器寫在 requestWake() 裡面 —— 每呼叫一次就多
+        掛一個，切分頁幾次之後會同時發出好幾個請求。
+     2. 那個監聽器只有在「第一次請求成功」時才會掛上。第一次失敗（例如當下
+        頁面不可見）就永遠不會再試。
+     3. 只有按「開始導航警示」才會啟動；按「先不開 GPS」完全沒有。
+
+   另外瀏覽器本來就可能主動收回鎖（電量過低、系統政策），要監聽 release
+   才知道自己已經沒有鎖了。
+   ═══════════════════════════════════════════════════════════ */
+/* 有些瀏覽器（部分 WebView、舊版 Safari）會宣告 navigator.wakeLock 這個屬性
+   但底下是空的。只用 'wakeLock' in navigator 判斷，就會走進去然後噴
+   「Cannot read properties of undefined」，使用者只看到一句看不懂的錯誤。
+   所以要確認 request 真的是個函式。 */
+const wakeSupported=()=>{
+  try{ return typeof navigator!=='undefined' && !!navigator.wakeLock
+              && typeof navigator.wakeLock.request==='function'; }
+  catch(e){ return false; }
+};
+const WAKE={lock:null,on:false,supported:wakeSupported(),reason:''};
+
+async function wakeAcquire(){
+  if(!CFG.wake){ WAKE.reason='設定中已關閉'; paintWake(); return false; }
+  WAKE.supported=wakeSupported();
+  if(!WAKE.supported){ WAKE.reason='此瀏覽器不支援'; paintWake(); return false; }
+  if(WAKE.lock) return true;                                  // 已經有了，不重複請求
+  if(document.visibilityState!=='visible'){ WAKE.reason='頁面在背景'; paintWake(); return false; }
+  try{
+    const l=await navigator.wakeLock.request('screen');
+    WAKE.lock=l; WAKE.on=true; WAKE.reason='';
+    // 系統收回時（低電量、切到背景）要更新狀態，不然畫面會騙人
+    l.addEventListener('release',()=>{
+      if(WAKE.lock===l){ WAKE.lock=null; WAKE.on=false; WAKE.reason='已被系統收回'; paintWake(); }
+    });
+    paintWake(); return true;
+  }catch(e){
+    WAKE.lock=null; WAKE.on=false;
+    WAKE.reason=(e&&e.name==='NotAllowedError')?'瀏覽器拒絕，點一下畫面再試':'失敗：'+((e&&e.message)||e);
+    paintWake(); return false;
+  }
+}
+
+async function wakeRelease(){
+  const l=WAKE.lock; WAKE.lock=null; WAKE.on=false;
+  try{ if(l) await l.release(); }catch(e){}
+  paintWake();
+}
+
+function paintWake(){
+  const d=el('dWake'), t=el('lWake'); if(!d||!t) return;
+  d.className='dot '+(WAKE.on?'on':(CFG.wake?(WAKE.supported?'warn':'err'):''));
+  t.textContent= WAKE.on?'螢幕常亮' : (CFG.wake?'未常亮':'常亮已關');
+  t.title = WAKE.on? '螢幕不會自動關閉' : (WAKE.reason||'');
+  const h=el('wakeHint');
+  if(h) h.textContent = WAKE.on? '目前生效中：螢幕不會自動關閉。'
+       : WAKE.supported? (CFG.wake? ('目前沒有生效 —— '+(WAKE.reason||'原因不明')+'。點一下畫面通常就會恢復。')
+                                  : '已關閉，螢幕會依系統設定自動關掉。')
+       : '這個瀏覽器不支援螢幕常亮（iOS 需 16.4 以上）。請改到手機「設定 → 螢幕顯示與亮度 → 自動鎖定」選「永不」。';
+}
+
+/* 只註冊一次。回到前景就重新取得 —— 瀏覽器切走時一定會收回鎖。 */
+if(typeof document!=='undefined'){
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible') wakeAcquire();
+    else { WAKE.lock=null; WAKE.on=false; paintWake(); }
+  });
+}
+
+// 舊名稱保留，避免其他地方漏改
+function requestWake(){ return wakeAcquire(); }
+
+/* ---------- 11. 模擬行車 ---------- */
+function buildSimRoute(){
+  if(!CAMS.length) return null;
+  // 找出點位最密集的區域，取其附近 10 點依經度排序當作路徑
+  let center=CAMS[0],bestN=-1;
+  for(const c of CAMS){
+    let n=0; for(const o of CAMS) if(Math.abs(o.lat-c.lat)<0.03&&Math.abs(o.lon-c.lon)<0.03) n++;
+    if(n>bestN){ bestN=n; center=c; }
+  }
+  const near=CAMS.filter(c=>Math.abs(c.lat-center.lat)<0.05&&Math.abs(c.lon-center.lon)<0.05)
+                 .sort((a,b)=>a.lat-b.lat).slice(0,12);
+  if(near.length<2) return null;
+  // 路徑略微偏離測速點本身（模擬走在同一條路上但不是完全重疊）
+  return near.map(c=>[c.lat,c.lon]);
+}
+function startSim(){
+  const route=buildSimRoute();
+  if(!route){ toast('資料庫點位不足，無法模擬'); return; }
+  stopSim();
+  const spd=CFG.simSpd/3.6;              // m/s
+  let seg=0, prog=0, tick=200;
+  el('simTag').classList.remove('hidden');
+  el('btnSim').textContent='停止模擬'; el('btnSim').classList.remove('gold'); el('btnSim').classList.add('danger');
+  if(MAP) MAP.setView(route[0],14);
+  SIM=setInterval(()=>{
+    if(seg>=route.length-1){ toast('模擬行車結束'); stopSim(); return; }
+    const a=route[seg], b=route[seg+1];
+    const segLen=dist(a[0],a[1],b[0],b[1]);
+    prog+=spd*(tick/1000);
+    if(prog>=segLen){ prog-=segLen; seg++; return; }
+    const f=segLen>0?prog/segLen:1;
+    const lat=a[0]+(b[0]-a[0])*f, lon=a[1]+(b[1]-a[1])*f;
+    onPos(lat,lon,bearing(a[0],a[1],b[0],b[1]),spd,8,true);
+  },tick);
+}
+function stopSim(){
+  if(SIM){ clearInterval(SIM); SIM=null; }
+  el('simTag').classList.add('hidden');
+  el('btnSim').textContent='開始模擬行車'; el('btnSim').classList.add('gold'); el('btnSim').classList.remove('danger');
+  state.clear();
+}
+
+/* ---------- 12. 地圖 ---------- */
+let MAP=null,camLayer=null,meMarker=null,meCircle=null,pickMode=false;
+function initMap(){
+  if(typeof L==='undefined'){ el('radarWrap').classList.remove('hidden'); el('map').style.display='none'; return; }
+  try{
+    MAP=L.map('map',{zoomControl:false,attributionControl:true}).setView([24.75,121.75],11);
+    // OSM 圖磚使用政策要求完整標示且不得隱藏在收合選單後面。
+    // 少了 "contributors" 就不算合規的標示。
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:19,
+       attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+      }).addTo(MAP);
+    L.control.zoom({position:'bottomleft'}).addTo(MAP);
+    camLayer=L.layerGroup().addTo(MAP);
+    MAP.on('contextmenu',e=>{ if(pickMode){ addReportAt(e.latlng.lat,e.latlng.lng); pickMode=false; toast('已於選取位置新增'); } });
+    let pressT;
+    MAP.on('mousedown touchstart',e=>{ if(!pickMode)return; pressT=setTimeout(()=>{
+      addReportAt(e.latlng.lat,e.latlng.lng); pickMode=false; toast('已於選取位置新增'); },600); });
+    MAP.on('mouseup touchend mousemove touchmove',()=>clearTimeout(pressT));
+  }catch(e){ el('radarWrap').classList.remove('hidden'); }
+}
+function camColor(c){ return c.src==='user'? '#4aa8ff' : c.sec? '#c9a227' : '#ff4d4d'; }
+function drawCamLayer(){
+  if(!camLayer) return;
+  camLayer.clearLayers();
+  const sub=CAMS.length>1500? CAMS.filter((_,i)=>i%2===0) : CAMS;
+  sub.forEach(c=>{
+    L.circleMarker([c.lat,c.lon],{radius:5,color:'#fff',weight:1,fillColor:camColor(c),fillOpacity:.95})
+     .bindPopup('<b>'+esc(c.name)+'</b><br>'+(c.lim?('速限 '+c.lim+' km/h<br>'):'')+esc(c.dir||''))
+     .addTo(camLayer);
+  });
+}
+function updateMapPos(p){
+  if(!MAP) return;
+  if(!meMarker){
+    meMarker=L.circleMarker([p.lat,p.lon],{radius:8,color:'#fff',weight:2,fillColor:'#2fd07a',fillOpacity:1}).addTo(MAP);
+    meCircle=L.circle([p.lat,p.lon],{radius:p.acc||20,color:'#2fd07a',weight:1,fillOpacity:.07}).addTo(MAP);
+    MAP.setView([p.lat,p.lon],15);
+  } else {
+    meMarker.setLatLng([p.lat,p.lon]); meCircle.setLatLng([p.lat,p.lon]).setRadius(p.acc||20);
+    if(followMe) MAP.panTo([p.lat,p.lon],{animate:true,duration:.4});
+  }
+}
+let followMe=true;
+
+/* ---------- 13. 雷達（Leaflet 不可用時 / 隧道離線時） ---------- */
+function drawRadar(p){
+  const cv=el('radar'); if(!cv||el('radarWrap').classList.contains('hidden')) return;
+  const g=cv.getContext('2d'), W=cv.width, H=cv.height, cx=W/2, cy=H*0.62, RANGE=1200, px=Math.min(W,H)*0.42/RANGE;
+  g.fillStyle='#0a0e13'; g.fillRect(0,0,W,H);
+  g.strokeStyle='#1e2a38'; g.lineWidth=2;
+  [300,600,900,1200].forEach(r=>{ g.beginPath(); g.arc(cx,cy,r*px,0,7); g.stroke();
+    g.fillStyle='#33455c'; g.font='16px sans-serif'; g.fillText(r+'m',cx+4,cy-r*px-4); });
+  if(!p) return;
+  const hd=p.heading||0;
+  CAMS.forEach(c=>{
+    const d=dist(p.lat,p.lon,c.lat,c.lon); if(d>RANGE) return;
+    const b=bearing(p.lat,p.lon,c.lat,c.lon), rel=rad(b-hd);
+    const x=cx+Math.sin(rel)*d*px, y=cy-Math.cos(rel)*d*px;
+    g.fillStyle=camColor(c); g.beginPath(); g.arc(x,y,7,0,7); g.fill();
+    g.strokeStyle='#fff'; g.lineWidth=1.5; g.stroke();
+    if(c.lim){ g.fillStyle='#cfe0f2'; g.font='bold 13px sans-serif'; g.fillText(c.lim,x+10,y+4); }
+  });
+  g.save(); g.translate(cx,cy); g.fillStyle='#2fd07a';
+  g.beginPath(); g.moveTo(0,-16); g.lineTo(11,13); g.lineTo(0,7); g.lineTo(-11,13); g.closePath(); g.fill();
+  g.restore();
+}
+
+/* ---------- 14. CSV / GeoJSON 解析 ---------- */
+function parseCSV(text){
+  const rows=[]; let f='',row=[],q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false; } else f+=ch; }
+    else if(ch==='"') q=true;
+    else if(ch===','){ row.push(f); f=''; }
+    else if(ch==='\n'){ row.push(f); rows.push(row); row=[]; f=''; }
+    else if(ch!=='\r') f+=ch;
+  }
+  if(f.length||row.length){ row.push(f); rows.push(row); }
+  return rows.filter(r=>r.some(x=>x!==''));
+}
+function findCol(hdr,pats){
+  for(let i=0;i<hdr.length;i++){ const h=(hdr[i]||'').trim();
+    for(const p of pats) if(p.test(h)) return i; }
+  return -1;
+}
+function rowsToCams(rows){
+  if(rows.length<2) return [];
+  let hi=0;
+  // 有些政府 CSV 第 2 列是中文說明列，跳過
+  const hdr=rows[0];
+  const iLat=findCol(hdr,[/^lat/i,/緯度/,/^y$/i,/latitude/i]);
+  const iLon=findCol(hdr,[/^lon/i,/^lng/i,/經度/,/^x$/i,/longitude/i]);
+  if(iLat<0||iLon<0) throw new Error('找不到經緯度欄位（需含 Latitude/Longitude 或 緯度/經度）');
+  const iLim=findCol(hdr,[/速限/,/limit/i,/limitspeed/i]);
+  const iDir=findCol(hdr,[/拍攝方向/,/direct/i,/方向/]);
+  // 國道資料集用「設置地點 / 設置區域描述」，縣市資料集用「地址」
+  const iAdr=findCol(hdr,[/設置地點/,/address/i,/地址/,/地點/,/名稱/,/location/i,/^name$/i,/路段/]);
+  const iAdr2=findCol(hdr,[/設置區域描述/,/備註/]);
+  const iCity=findCol(hdr,[/cityname/i,/縣市/,/^city/i]);
+  const iReg=findCol(hdr,[/行政區/,/region/i,/鄉鎮/,/^dist/i,/區域/]);
+  const iKind=findCol(hdr,[/取締項目/,/型式/]);
+  const out=[];
+  for(let r=1;r<rows.length;r++){
+    const row=rows[r];
+    const lat=parseFloat(row[iLat]), lon=parseFloat(row[iLon]);
+    if(!isFinite(lat)||!isFinite(lon)) continue;
+    if(lat<21.5||lat>26.5||lon<118||lon>122.5) continue;   // 台灣本島+外島範圍檢核
+    const nm=[iCity>=0?row[iCity]:'', iReg>=0?row[iReg]:'',
+              iAdr>=0?row[iAdr]:'', (iAdr>=0&&row[iAdr])?'':(iAdr2>=0?row[iAdr2]:'')]
+             .filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+    // 取締項目若寫明區間測速，併進方向欄讓警示層辨識
+    let dir=(iDir>=0?row[iDir]:'')||'';
+    const kind=(iKind>=0?row[iKind]:'')||'';
+    if(/區間/.test(kind)&&!/區間/.test(dir)) dir=dir+'(區間測速)';
+    out.push([lat,lon,parseInt(row[iLim],10)||0,dir,nm||'測速點']);
+  }
+  return out;
+}
+function geojsonToCams(gj){
+  const out=[];
+  (gj.features||[]).forEach(f=>{
+    const g=f.geometry; if(!g||g.type!=='Point') return;
+    const [lon,lat]=g.coordinates; const p=f.properties||{};
+    out.push([lat,lon,parseInt(p.limit||p.速限||p.SpeedLimit,10)||0,
+              p.direct||p.方向||'', p.name||p.Address||p.地址||'測速點']);
+  });
+  return out;
+}
+function isZip(buf){ const b=new Uint8Array(buf.slice(0,4));
+  return b[0]===0x50&&b[1]===0x4B&&(b[2]===3||b[2]===5||b[2]===7); }
+function decodeBuf(buf){
+  try{ return new TextDecoder('utf-8',{fatal:true}).decode(buf); }
+  catch(e){ try{ return new TextDecoder('big5').decode(buf); }
+            catch(e2){ return new TextDecoder('utf-8').decode(buf); } }
+}
+function textToCams(text){
+  const t=text.replace(/^﻿/,'').trim();
+  if(t[0]==='{'||t[0]==='['){
+    const j=JSON.parse(t);
+    return Array.isArray(j)
+      ? (Array.isArray(j[0])? j : j.map(o=>[o.lat,o.lon||o.lng,o.limit||0,o.direct||'',o.name||'']))
+      : geojsonToCams(j);
+  }
+  return rowsToCams(parseCSV(t));
+}
+
+/* 匯入＝新增一個來源（不覆蓋既有來源）。同名來源會被取代，方便更新。 */
+function ingest(text,label){
+  const cams=textToCams(text).filter(c=>isFinite(c[0])&&isFinite(c[1]));
+  if(!cams.length) throw new Error('沒有解析到有效點位');
+  return addPack(label||('匯入 '+new Date().toLocaleDateString('zh-TW')),cams);
+}
+function addPack(name,rows){
+  const id=name.replace(/[^\w一-龥]+/g,'_').slice(0,40)||('p'+Date.now());
+  PACKS=PACKS.filter(p=>p.id!==id);
+  PACKS.push({id,name,rows,t:Date.now()});
+  savePacks(); rebuildDB();
+  // 這個來源實際貢獻了幾點（其餘是與既有來源座標重複而被合併掉的）
+  const kept=CAMS.filter(c=>c.src==='pack:'+id).length;
+  const dropped=rows.length-kept;
+  toast('已加入「'+name+'」'+kept+' 點'+(dropped>0?'（另 '+dropped+' 點與既有來源重複，已合併）':'')+
+        '，資料庫共 '+CAMS.length+' 點',4600);
+  if(MAP&&rows.length) MAP.setView([rows[0][0],rows[0][1]],10);
+  return rows.length;
+}
+
+/* ZIP：政府開放資料（例如國道那份）只提供壓縮檔，直接在瀏覽器內解開 */
+async function ingestZip(buf,label){
+  if(typeof fflate==='undefined') throw new Error('ZIP 解壓元件未載入（需連網一次）');
+  const files=fflate.unzipSync(new Uint8Array(buf));
+  const names=Object.keys(files).filter(n=>/\.(csv|json|geojson|txt)$/i.test(n)&&!/^__MACOSX/.test(n));
+  if(!names.length) throw new Error('ZIP 內找不到 CSV / JSON 檔');
+  let total=0, used=[];
+  for(const n of names){
+    try{
+      const cams=textToCams(decodeBuf(files[n].buffer)).filter(c=>isFinite(c[0])&&isFinite(c[1]));
+      if(cams.length){ total+=cams.length; used.push({n,cams}); }
+    }catch(e){ /* 略過壓縮檔內無法解析的檔案 */ }
+  }
+  if(!total) throw new Error('ZIP 內沒有解析到有效點位');
+  // 合併壓縮檔內所有可解析的檔案成單一來源
+  addPack(label.replace(/\.zip$/i,''), used.flatMap(u=>u.cams));
+  return total;
+}
+
+/* ---------- 15. TDX 即時路況 ---------- */
+let tdxToken=null,tdxExp=0;
+async function tdxAuth(){
+  if(tdxToken&&Date.now()<tdxExp-60000) return tdxToken;
+  if(!CFG.tdxId||!CFG.tdxSecret) throw new Error('尚未填入 TDX 金鑰');
+  const r=await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token',{
+    method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({grant_type:'client_credentials',client_id:CFG.tdxId,client_secret:CFG.tdxSecret})});
+  if(!r.ok) throw new Error('取得 token 失敗 ('+r.status+')');
+  const j=await r.json();
+  tdxToken=j.access_token; tdxExp=Date.now()+(j.expires_in||86400)*1000;
+  return tdxToken;
+}
+async function fetchTraffic(){
+  el('tdxStat').textContent='連線中…';
+  try{
+    const tk=await tdxAuth();
+    const r=await fetch(CFG.tdxPath,{headers:{authorization:'Bearer '+tk,accept:'application/json'}});
+    if(!r.ok) throw new Error('API 回應 '+r.status);
+    const j=await r.json();
+    const arr=Array.isArray(j)?j:(j.LiveTraffics||j.Newses||j.Sections||j.data||j.Incidents||[]);
+    TRAFFIC=arr.slice(0,60).map(o=>({
+      title:o.Description||o.Title||o.SectionName||o.RoadName||JSON.stringify(o).slice(0,90),
+      meta:[o.RoadName,o.SectionName,o.CongestionLevel!=null?('壅塞 '+o.CongestionLevel):'',
+            o.TravelSpeed!=null?(o.TravelSpeed+' km/h'):''].filter(Boolean).join(' · '),
+      kind:'TDX', t:Date.now(), lat:o.PositionLat||o.Latitude, lon:o.PositionLon||o.Longitude }));
+    el('tdxStat').textContent='✅ 連線成功，取得 '+TRAFFIC.length+' 筆';
+    renderTraffic(); toast('已更新 '+TRAFFIC.length+' 筆即時路況');
+  }catch(e){
+    el('tdxStat').textContent='❌ '+e.message+'（瀏覽器直接呼叫可能被 CORS 擋下，正式版建議透過自己的後端代理）';
+    toast('路況取得失敗：'+e.message,4200);
+  }
+}
+
+/* ---------- 16. 路況 / 播報 UI ---------- */
+const BC_KINDS=['事故','壅塞','施工','管制','天候','其他'];
+let bcKindSel='事故', trafficFilter='全部';
+function renderTrafficFilter(){
+  const opts=['全部','TDX','播報','回報'];
+  el('trafficFilter').innerHTML=opts.map(o=>
+    `<button class="chip ${o===trafficFilter?'sel':''}" data-tf="${o}">${o}</button>`).join('');
+}
+function allTrafficItems(){
+  const bc=BROADCASTS.map(b=>({title:b.text,meta:b.kind+' · '+new Date(b.t).toLocaleString('zh-TW',{hour12:false}),kind:'播報',t:b.t}));
+  const rp=REPORTS.filter(r=>!['測速點','科技執法','臨檢'].includes(r.kind))
+                  .map(r=>({title:r.kind+(r.note?' · '+r.note:''),
+                            meta:r.lat.toFixed(4)+', '+r.lon.toFixed(4)+' · '+new Date(r.t).toLocaleString('zh-TW',{hour12:false}),
+                            kind:'回報',t:r.t}));
+  return TRAFFIC.concat(bc,rp).sort((a,b)=>(b.t||0)-(a.t||0));
+}
+function renderTraffic(){
+  const items=allTrafficItems().filter(i=>trafficFilter==='全部'||i.kind===trafficFilter);
+  el('trafficCount').textContent=items.length+' 筆';
+  el('trafficList').innerHTML= items.length? items.map(i=>
+    `<div class="item"><div class="t">${esc(i.title)}</div>
+     <div class="m"><span class="tag ${i.kind==='回報'?'usr':''}">${esc(i.kind)}</span> ${esc(i.meta||'')}</div></div>`).join('')
+    : '<div class="empty">目前沒有路況。<br>可設定 TDX 金鑰抓即時資料，或在下方手動輸入聽到的廣播。</div>';
+}
+function renderBcKinds(){
+  el('bcKind').innerHTML=BC_KINDS.map(k=>`<button class="chip ${k===bcKindSel?'sel':''}" data-bc="${k}">${k}</button>`).join('');
+}
+
+/* ---------- 17. 回報 UI ---------- */
+const REP_KINDS=['測速點','科技執法','臨檢','事故','施工','坑洞'];
+let repKindSel='測速點';
+function renderRepKinds(){
+  el('repKind').innerHTML=REP_KINDS.map(k=>`<button class="chip ${k===repKindSel?'sel':''}" data-rk="${k}">${k}</button>`).join('');
+}
+function addReportAt(lat,lon){
+  const r={id:'r'+Date.now(),lat,lon,kind:repKindSel,lim:parseInt(el('repLimit').value,10)||0,
+           note:el('repNote').value.trim(),t:Date.now()};
+  REPORTS.unshift(r); Store.set(K('reports'),REPORTS);
+  el('repNote').value=''; rebuildDB(); renderReports(); renderTraffic();
+}
+function renderReports(){
+  el('repCount').textContent=REPORTS.length+' 筆';
+  el('repList').innerHTML= REPORTS.length? REPORTS.map(r=>
+    `<div class="item"><div class="t">${esc(r.kind)}${r.lim?' · 速限 '+r.lim:''}${r.note?' · '+esc(r.note):''}</div>
+      <div class="m">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)} · ${new Date(r.t).toLocaleString('zh-TW',{hour12:false})}
+      <button class="btn sm" data-del="${r.id}" style="float:right;margin-top:-4px">刪除</button></div></div>`).join('')
+    : '<div class="empty">還沒有回報紀錄</div>';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   17b. 公里樁號定位
+   高速公路旁每 100 公尺就有一支里程牌，乘客抬頭就看得到，
+   比在行進中拖地圖精準得多，也安全得多。
+   台灣國道與快速道路的里程都是「由北往南遞增」，
+   所以南下 = 里程增加、北上 = 里程遞減。
+   ═══════════════════════════════════════════════════════════ */
+const KM={
+  anchors:[],                                   // 從國道測速點名稱萃取出來的樁號錨點
+  live:Store.get(K('kmlive'),null),             // 使用者親自校正過的錨點（最準）
+  odo:0, odoFrom:null
+};
+
+/** 中文數字轉阿拉伯數字（1~99 就夠用了：國道一號、國道十號） */
+function cnNum(s){
+  const d={'零':0,'一':1,'二':2,'兩':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+  if(/^\d+$/.test(s)) return parseInt(s,10);
+  if(!/^[零一二兩三四五六七八九十]+$/.test(s)) return NaN;
+  const i=s.indexOf('十');
+  if(i<0){ let n=0; for(const c of s){ if(!(c in d)) return NaN; n=n*10+d[c]; } return n; }
+  const hi=i===0?1:d[s[i-1]];                  // 十 / 二十
+  const lo=i===s.length-1?0:d[s[i+1]];         // 十五 / 二十五
+  if(hi===undefined||lo===undefined) return NaN;
+  return hi*10+lo;
+}
+
+/**
+ * 從名稱抓出路名與里程。真實資料的寫法比想像多：
+ *   「國道1號南下 47.5K」（縣市版）
+ *   「國道一號南向2公里」（國道版，**中文數字**）
+ *   「國道三號甲線西向1.7公里」（有支線）
+ *   「臺2己線北向1.1公里」（臺不是台，己不是甲乙丙丁）
+ *   「台9線117k+772m」
+ */
+function parseKmName(name){
+  if(!name) return null;
+  const s=String(name);
+  let road=null;
+  // 國道：阿拉伯或中文數字，可能有甲乙丙支線
+  let m=s.match(/國道\s*([0-9零一二兩三四五六七八九十]+)\s*號?\s*([甲乙丙丁己]?)線?/)
+      ||s.match(/國\s*([0-9]+)\s*(?:號|線)\s*([甲乙丙丁己]?)/);
+  if(m){ const n=cnNum(m[1]); if(isFinite(n)) road='國'+n+(m[2]||''); }
+  // 省道／快速道路：台 或 臺
+  if(!road){ m=s.match(/[台臺]\s*([0-9]+)\s*([甲乙丙丁戊己庚]?)\s*線/);
+             if(m) road='台'+m[1]+(m[2]||''); }
+  if(!road) return null;
+  // 取第一個里程數字：47.5K / 47.5k / 47.5公里 / 117k+772m
+  const km=s.match(/(\d{1,3}(?:\.\d+)?)\s*(?:[Kk](?![a-z])|公里)(?:\s*\+\s*(\d{1,3})\s*[Mm公尺])?/);
+  if(!km) return null;
+  let v=parseFloat(km[1]);
+  if(km[2]) v+=parseInt(km[2],10)/1000;
+  if(!isFinite(v)||v<0||v>500) return null;
+  let dir='';
+  if(/南下|北往南|南向/.test(s)) dir='南下';
+  else if(/北上|南往北|北向/.test(s)) dir='北上';
+  return {road,km:v,dir};
+}
+
+function buildKmAnchors(){
+  const out=[];
+  for(const c of CAMS){
+    const p=parseKmName(c.name);
+    if(p) out.push({road:p.road,km:p.km,dir:p.dir,lat:c.lat,lon:c.lon});
+  }
+  KM.anchors=out;
+  return out.length;
+}
+
+/** 南下(往南)=里程增加 → +1；北上=遞減 → -1。用航向判斷，沒航向時用文字。 */
+function kmSign(heading,dirText){
+  if(heading!=null&&!isNaN(heading)) return (heading>90&&heading<270)?1:-1;
+  if(/南下/.test(dirText||'')) return 1;
+  if(/北上/.test(dirText||'')) return -1;
+  return 1;
+}
+const dirLabel=h=>(h!=null&&!isNaN(h))?((h>90&&h<270)?'南下':'北上'):'';
+
+/**
+ * 推算目前里程。
+ * conf='locked' 使用者校正過，沿路以 GPS 里程推進，最準
+ * conf='near'   由附近的國道測速點錨點推算，僅供起始建議
+ * conf='none'   沒有依據
+ */
+function kmEstimate(pos){
+  if(!pos) return {conf:'none'};
+  const L=KM.live;
+  if(L&&Date.now()-L.t<3*3600e3){
+    // 有路網就用沿路距離，彎道不會少算
+    const along=alongDistance(L.lat,L.lon,pos.lat,pos.lon);
+    const d=along!=null? along : dist(L.lat,L.lon,pos.lat,pos.lon);
+    if(d<60000){
+      const sign=kmSign(pos.heading,L.dir);
+      return {conf:'locked',road:L.road,dir:dirLabel(pos.heading)||L.dir,
+              km:Math.max(0,L.km+sign*d/1000),
+              acc: along!=null? '±30m（沿路計算）' : '±50m'};
+    }
+  }
+  let best=null;
+  for(const a of KM.anchors){
+    const d=dist(pos.lat,pos.lon,a.lat,a.lon);
+    if(d>5000) continue;
+    if(!best||d<best.d) best={a,d};
+  }
+  if(best){
+    const a=best.a, sign=kmSign(pos.heading,a.dir);
+    // 錨點在前方還是後方
+    const brg=bearing(a.lat,a.lon,pos.lat,pos.lon);
+    const ahead=(pos.heading!=null&&!isNaN(pos.heading))?(angDiff(brg,pos.heading)<90):true;
+    return {conf:'near',road:a.road,dir:dirLabel(pos.heading)||a.dir,
+            km:Math.max(0,a.km+sign*(ahead?1:-1)*best.d/1000),
+            acc:'±'+Math.round(best.d/100)/10+'km，請對照路邊里程牌校正'};
+  }
+  return {conf:'none'};
+}
+
+/** 使用者看著路邊里程牌校正 → 鎖定，之後靠 GPS 推進 */
+function kmLock(km,road,pos,dir){
+  if(!pos) return false;
+  KM.live={km:+km,road:road||'',dir:dir||dirLabel(pos.heading),
+           lat:pos.lat,lon:pos.lon,t:Date.now()};
+  Store.set(K('kmlive'),KM.live);
+  return true;
+}
+
+/** 把某個樁號換算回座標：沿目前行進方向前後推。 */
+function kmToLatLon(targetKm,est,pos){
+  if(!pos||!est||est.km==null) return [pos.lat,pos.lon];
+  const deltaKm=targetKm-est.km;
+  const sign=kmSign(pos.heading,est.dir);
+  const metres=deltaKm*1000*sign;              // 正=沿行進方向前方
+  const hd=(pos.heading!=null&&!isNaN(pos.heading))?pos.heading:(sign>0?180:0);
+  return destPoint(pos.lat,pos.lon,metres>=0?hd:(hd+180)%360,Math.abs(metres));
+}
+
+/** 產生可點選的樁號清單：往後 0.5 公里 + 往前約一分鐘車程 */
+function kmChoices(est,pos){
+  if(!est||est.km==null) return [];
+  const v=(pos&&pos.speed)||0;                                   // m/s
+  const aheadKm=Math.min(3,Math.max(1.0,v*60/1000));             // 一分鐘車程，1~3 公里
+  const from=Math.max(0,Math.round((est.km-0.5)*10)/10);
+  const to=Math.round((est.km+aheadKm)*10)/10;
+  const out=[];
+  for(let k=from;k<=to+1e-9;k=Math.round((k+0.1)*10)/10) out.push(Math.round(k*10)/10);
+  return out;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   17c. 掉落物 / 路況事件
+   ═══════════════════════════════════════════════════════════ */
+const HAZ_TYPES=[
+  {k:'掉落物',  i:'📦', sev:3, ttl:2*3600e3},
+  {k:'事故',    i:'🚨', sev:3, ttl:2*3600e3},
+  {k:'車輛故障',i:'🚗', sev:2, ttl:1*3600e3},
+  {k:'塞車',    i:'🐢', sev:1, ttl:45*60e3},
+  {k:'施工',    i:'🚧', sev:2, ttl:12*3600e3},
+  {k:'路面坑洞',i:'🕳️', sev:2, ttl:24*3600e3},
+  {k:'積水',    i:'💧', sev:2, ttl:6*3600e3},
+  {k:'動物',    i:'🐕', sev:2, ttl:1*3600e3},
+  {k:'臨檢',    i:'👮', sev:1, ttl:3*3600e3},
+];
+const hazMeta=k=>HAZ_TYPES.find(x=>x.k===k)||{k,i:'⚠️',sev:2,ttl:2*3600e3};
+
+/* 置信度半衰期（分鐘）。跟後端同一組數字，沒連後端時本機也能自己衰減。 */
+const HALF_LIFE={'事故':25,'車輛故障':20,'掉落物':45,'塞車':15,'施工':240,
+                 '路面坑洞':720,'積水':180,'動物':20,'臨檢':60};
+const SCORE_SPEAK=1.0;    // 高於此值才出聲
+const SCORE_SHOW =0.4;    // 高於此值只顯示在畫面，低於就完全不提
+
+/**
+ * 事件目前的置信度。後端有算就用後端的（它看得到所有人的探針），
+ * 沒有就本機自己依時間衰減 —— 至少不會永遠掛著。
+ */
+function hazScore(h,now){
+  now=now||Date.now();
+  if(h.officialCleared) return 0;
+  const hl=(HALF_LIFE[h.type]||45)*60e3;
+  const age=Math.max(0,now-(h.lastReport||h.t));
+  // 基數 2 起跳：剛回報時一定出聲；每多一人確認 +1，警示期就跟著延長
+  let s=(2+(h.confirms||0))*Math.pow(0.5,age/hl);
+  const p=h.probes||{};
+  s*=Math.pow(0.72,p.clear||0);
+  s*=Math.min(3,Math.pow(1.18,p.still||0));
+  if(h.official==='open') s=Math.max(s,1.2);
+  // 後端算過就以後端為準（它彙整了所有人的探針）
+  if(typeof h.score==='number') s=h.score;
+  return s;
+}
+const scoreLabel=s=> s>=SCORE_SPEAK?'高' : s>=SCORE_SHOW?'待確認' : '已過期';
+/* 西濱=台61線快速道路，與高架、國道同屬高速類 */
+const ROAD_CLASSES=['國道','高架/快速道路','一般道路'];
+const isFastRoad=rc=>rc==='國道'||rc==='高架/快速道路';
+
+let HAZARDS=Store.get(K('hazards'),[]);        // 本機 + 從後端拉回來的，合在一起
+const saveHazards=()=>Store.set(K('hazards'),HAZARDS.filter(h=>h.expires>Date.now()).slice(0,500));
+
+function deviceId(){
+  let d=Store.get(K('dev'),null);
+  if(!d){ d='d'+Math.random().toString(36).slice(2,10); Store.set(K('dev'),d); }
+  return d;
+}
+
+/**
+ * 掉落物的警示距離。
+ * 高速類：以「反應時間」為準 —— 時速 100 的 90 秒 ≈ 2.5 公里，下限 1.5 上限 5 公里。
+ *         塞車時自動縮短，飆車時自動拉長，比固定公里數合理。
+ * 一般道路：有紅綠燈與路口，500 公尺前提醒就夠，太早反而變雜訊。
+ */
+function hazTiers(h,v){
+  const cl=x=>Math.max(x[1],Math.min(x[2],x[0]));
+  if(isFastRoad(h.roadClass)) return [cl([v*90,1500,5000]),cl([v*45,800,2500]),cl([v*15,300,900])];
+  return [Math.max(500,v*30),Math.max(250,v*15),Math.max(100,v*6)];
+}
+
+const hazState=new Map();
+function evaluateHazards(pos){
+  const {lat,lon,heading}=pos, v=pos.speed||0, now=Date.now();
+  let best=null;
+  for(const h of HAZARDS){
+    if(h.expires<=now||h.hidden) continue;
+    // 置信度太低就當作不存在（時間衰減 + 車流否證的結果）
+    const sc=hazScore(h,now);
+    if(sc<SCORE_SHOW) continue;
+    h._score=sc;
+    const T=hazTiers(h,v), far=T[0]*1.3;
+    const dLat=far/111320*1.2, dLon=far/(111320*Math.max(0.2,Math.cos(rad(lat))))*1.2;
+    if(Math.abs(h.lat-lat)>dLat||Math.abs(h.lon-lon)>dLon){ hazState.delete(h.id); continue; }
+    const d=dist(lat,lon,h.lat,h.lon);
+    if(d>far){ hazState.delete(h.id); continue; }
+    // 對向車道的事件不要報
+    if(CFG.dirFilter&&h.brg!=null&&heading!=null&&!isNaN(heading)&&angDiff(h.brg,heading)>70){
+      hazState.delete(h.id); continue; }
+    // 必須在前方
+    if(heading!=null&&!isNaN(heading)&&v>1.5&&angDiff(bearing(lat,lon,h.lat,h.lon),heading)>85){
+      hazState.delete(h.id); continue; }
+    let tier=0;
+    if(d<=T[2]) tier=3; else if(d<=T[1]) tier=2; else if(d<=T[0]) tier=1;
+    if(!tier) continue;
+    // 同一級距時：先比嚴重度，再比回報人數（越多人看到越可信），最後才比距離
+    const sev=hazMeta(h.type).sev, rep=h.reports||1;
+    if(!best||tier>best.tier
+       ||(tier===best.tier&&(sev>best.sev
+       ||(sev===best.sev&&(rep>best.rep
+       ||(rep===best.rep&&d<best.d)))))) best={haz:h,d,tier,sev,rep};
+  }
+  if(best){
+    const prev=hazState.get(best.haz.id)||0;
+    const sc=best.haz._score!=null?best.haz._score:hazScore(best.haz,now);
+    best.score=sc;
+    if(best.tier>prev){
+      if(sc>=SCORE_SPEAK){
+        // 置信度高 → 完整語音警示
+        if(announceHaz(best.haz,best.d,best.tier)) hazState.set(best.haz.id,best.tier);
+      }else{
+        // 置信度中等 → 只在畫面顯示，不出聲，不干擾駕駛
+        hazState.set(best.haz.id,best.tier);
+      }
+    }
+  }
+  return best;
+}
+
+/** 「國1」唸成「國道1號」、「台61」唸成「台61線」，避免和後面的里程數字黏在一起 */
+function roadSpeak(r){
+  if(!r) return '';
+  let m=String(r).match(/^國(\d+)$/); if(m) return '國道'+m[1]+'號';
+  m=String(r).match(/^台(\d+)$/);     if(m) return '台'+m[1]+'線';
+  return r;
+}
+function announceHaz(h,d,tier){
+  const now=Date.now();
+  if(now-lastAlertAt<(tier===3?450:1100)) return false;
+  lastAlertAt=now;
+  const dm=d<1000?Math.round(d/50)*50+'公尺':(d/1000).toFixed(1)+'公里';
+  const where=h.km!=null?('，'+roadSpeak(h.road)+(h.road?' ':'')+h.km.toFixed(1)+'公里處'):'';
+  const rep=h.reports||1, who=rep>=2?(rep+'人回報，'):'';
+  let txt;
+  if(tier===1) txt='前方'+dm+'，'+who+'注意'+h.type+where;
+  else if(tier===2) txt='注意，'+dm+'有'+h.type+(h.lane?'，'+h.lane:'')+(rep>=3?('，'+rep+'人回報'):'');
+  else txt=h.type+'就在前方'+(h.lane?'，'+h.lane:'')+'，請小心';
+  Audio_.say(txt);
+  const s=hazMeta(h.type).sev;
+  if(tier===1){ Audio_.beep(520,.16); Audio_.vibe(90); }
+  if(tier===2){ Audio_.beep(700,.18); Audio_.vibe([100,60,100]); }
+  if(tier===3){ Audio_.beep(s>=3?1000:820,.26,.14); Audio_.vibe([160,70,160,70,200]); }
+  return true;
+}
+
+/* ---------- 17d. 建立回報 ---------- */
+function makeHazard(o){
+  const meta=hazMeta(o.type), now=Date.now();
+  return {id:o.id||('l'+now.toString(36)+Math.random().toString(36).slice(2,6)),
+    type:o.type,lat:+o.lat,lon:+o.lon,
+    road:o.road||'',roadClass:o.roadClass||'一般道路',dir:o.dir||'',
+    km:(o.km==null||o.km==='')?null:+o.km,lane:o.lane||'',note:o.note||'',
+    brg:o.brg==null?null:o.brg,
+    t:o.t||now,expires:o.expires||(now+meta.ttl),
+    confirms:o.confirms||0,
+    reports:o.reports||(1+(o.confirms||0)),          // 幾個人回報過這一件
+    lastReport:o.lastReport||o.t||now,
+    serverId:o.serverId||(o.mine===false?o.id:undefined),
+    iConfirmed:!!o.iConfirmed,
+    mine:o.mine!==false,synced:!!o.synced};
+}
+function addHazard(o){
+  const h=makeHazard(o);
+  HAZARDS=HAZARDS.filter(x=>x.id!==h.id);
+  HAZARDS.unshift(h); saveHazards();
+  hazState.delete(h.id);
+  renderHazards(); drawHazLayer(); renderTraffic();
+  if(CFG.hazUrl) pushHazard(h);
+  return h;
+}
+function removeHazard(id){
+  HAZARDS=HAZARDS.filter(h=>h.id!==id); saveHazards();
+  renderHazards(); drawHazLayer(); renderTraffic();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   17e0. 被動車流驗證
+   這是「不需要有人顧後台」的核心。
+   經過事件點時，比對你在事件點附近的最低速，跟你接近前的巡航速度。
+   沒慢下來 → 東西大概不在了；明顯慢下來 → 還在。
+   使用者完全不用按任何東西。
+
+   用「你自己的巡航速度」當基準，不用外部路況資料 —— 塞車時大家都慢，
+   跟基準比才有意義。
+   ═══════════════════════════════════════════════════════════ */
+const PROBE={cruise:[],watch:new Map()};      // watch: hazId -> {minV, entered}
+
+/** 收一筆速度樣本，只留最近 2 分鐘 */
+function cruiseSample(v){
+  const now=Date.now();
+  PROBE.cruise.push({v,t:now});
+  while(PROBE.cruise.length&&now-PROBE.cruise[0].t>120e3) PROBE.cruise.shift();
+}
+/** 取最近 2 分鐘速度樣本的中位數當巡航速度；帶 v 進來就順便取樣 */
+function cruiseSpeed(v){
+  if(v!=null) cruiseSample(v);
+  else { const now=Date.now();
+         while(PROBE.cruise.length&&now-PROBE.cruise[0].t>120e3) PROBE.cruise.shift(); }
+  const xs=PROBE.cruise.map(x=>x.v).sort((a,b)=>a-b);
+  if(xs.length<5) return null;
+  return xs[Math.floor(xs.length/2)];
+}
+
+function probeTick(pos){
+  if(!CFG.probeSend||!CFG.hazUrl) return;
+  const v=(pos.speed||0)*3.6;
+  const now=Date.now();
+  // 基準速度要在「還沒進入任何事件觀察範圍」時累積，否則會被事件本身造成的
+  // 塞車拉低，變成「基準也慢、通過也慢 → 判定沒事」的假陰性。
+  if(PROBE.watch.size===0) cruiseSample(v);
+  const base=cruiseSpeed();
+  for(const h of HAZARDS){
+    if(h.expires<=now) continue;
+    const d=dist(pos.lat,pos.lon,h.lat,h.lon);
+    let w=PROBE.watch.get(h.id);
+    if(d<250){
+      // 進入觀察範圍：記下此刻的巡航速度當基準
+      if(!w){ w={base,minV:v,entered:now}; PROBE.watch.set(h.id,w); }
+      else if(v<w.minV) w.minV=v;
+    } else if(w&&d>450){
+      // 離開了 → 判定並回報
+      PROBE.watch.delete(h.id);
+      if(w.base&&w.base>25&&now-w.entered<300e3){    // 基準太慢就不判（本來就在塞車）
+        const slowdown=1-(w.minV/w.base);
+        // 減速超過 35% 視為「還在」；不到 15% 視為「已排除」；中間不表態
+        if(slowdown>=0.35) sendProbe(h,true);
+        else if(slowdown<=0.15) sendProbe(h,false);
+      }
+    }
+  }
+}
+
+async function sendProbe(h,slowed){
+  const base=(CFG.hazUrl||'').replace(/\/+$/,'');
+  const sid=h.serverId||(h.mine?null:h.id);
+  if(!base||!sid) return;
+  try{
+    // 只送 slowed 這個布林值，不送速度、不送我的座標、不送裝置代號
+    const r=await fetch(base+'/hazards/'+encodeURIComponent(sid)+'/probe',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({lat:h.lat,lon:h.lon,slowed:!!slowed})});
+    const j=await r.json();
+    if(j.removed){ removeHazard(h.id); return; }
+    if(j.score!=null){ h.score=j.score; h.probes=j.probes; saveHazards(); renderHazards(); }
+  }catch(e){ /* 探針失敗無所謂，下一台車會再送 */ }
+}
+
+/* ---------- 17e. 與後端同步 ---------- */
+async function pushHazard(h){
+  const base=(CFG.hazUrl||'').replace(/\/+$/,'');
+  if(!base) return;
+  try{
+    const r=await fetch(base+'/report',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({lat:h.lat,lon:h.lon,type:h.type,road:h.road,roadClass:h.roadClass,
+        dir:h.dir,km:h.km,lane:h.lane,note:h.note,brg:h.brg,device:deviceId()})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+    h.synced=true;
+    if(j.hazard){ h.serverId=j.hazard.id; h.reports=j.hazard.reports; h.confirms=j.hazard.confirms;
+                  h.expires=j.hazard.expires; }
+    saveHazards(); renderHazards(); drawHazLayer();
+    toast(j.merged? ('附近已有同類回報，已幫你加上確認，目前共 '+(j.hazard?j.hazard.reports:'?')+' 人回報')
+                  : '已上傳，附近的人會收到提醒');
+  }catch(e){ toast('回報已存在本機，上傳失敗：'+e.message,4000); }
+}
+/** 撤銷自己的回報。本人按錯／看錯，立即生效，不需要別人投票。 */
+async function retractHazard(h){
+  const base=(CFG.hazUrl||'').replace(/\/+$/,'');
+  if(!base||!h.serverId){ removeHazard(h.id); toast('已撤銷（未上傳過，只存在本機）'); return; }
+  try{
+    const r=await fetch(base+'/hazards/'+encodeURIComponent(h.serverId)+'/retract',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({lat:h.lat,lon:h.lon,device:deviceId()})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+    removeHazard(h.id);
+    toast('已撤銷，其他人不會再收到這則提醒');
+  }catch(e){
+    removeHazard(h.id);
+    toast('本機已移除，但撤銷上傳失敗：'+e.message+'（它會依置信度自動下架）',5000);
+  }
+}
+
+/** 對後端投票：kind='confirm' 我也看到了 / 'clear' 已經清掉了 */
+async function voteHazard(h,kind){
+  const base=(CFG.hazUrl||'').replace(/\/+$/,'');
+  const sid=h.serverId||(h.mine?null:h.id);
+  if(!base||!sid){
+    // 沒有後端就只在本機處理
+    if(kind==='clear'){ removeHazard(h.id); toast('已從本機移除'); }
+    else { h.reports=(h.reports||1)+1; h.iConfirmed=true; saveHazards(); renderHazards(); drawHazLayer();
+           toast('已記錄（未設定後端，只存在本機）'); }
+    return;
+  }
+  try{
+    const r=await fetch(base+'/hazards/'+encodeURIComponent(sid)+'/'+kind,{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({lat:h.lat,lon:h.lon})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+    if(j.removed){ removeHazard(h.id); toast('已回報清除，這筆事件已從共享清單移除'); return; }
+    if(j.hazard){
+      h.reports=j.hazard.reports; h.confirms=j.hazard.confirms;
+      h.expires=j.hazard.expires;
+      if(kind==='confirm') h.iConfirmed=true;
+      saveHazards(); renderHazards(); drawHazLayer();
+      toast(kind==='confirm'? ('已確認，目前共 '+h.reports+' 人回報')
+                            : ('已回報清除（還差 '+Math.max(0,2-(j.hazard.clears||0))+' 票就會消失）'));
+    }
+  }catch(e){
+    // 後端連不上時至少不要讓使用者白按
+    if(kind==='clear'){ removeHazard(h.id); toast('後端連線失敗，已先從本機移除'); }
+    else toast('確認失敗：'+e.message,4000);
+  }
+}
+
+async function pullHazards(pos,silent){
+  const base=(CFG.hazUrl||'').replace(/\/+$/,'');
+  if(!base||!pos) return 0;
+  try{
+    const r=await fetch(base+'/hazards?lat='+pos.lat.toFixed(5)+'&lon='+pos.lon.toFixed(5)+'&r=15000');
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+    const mineIds=new Set(HAZARDS.filter(h=>h.mine).map(h=>h.serverId||h.id));
+    const confirmed=new Set(HAZARDS.filter(h=>h.iConfirmed).map(h=>h.serverId||h.id));
+    // 我自己回報的那些：用伺服器回來的人數更新，但保留「這是我的」標記
+    const byId={}; (j.hazards||[]).forEach(h=>{ byId[h.id]=h; });
+    HAZARDS.filter(h=>h.mine&&h.serverId&&byId[h.serverId]).forEach(h=>{
+      h.reports=byId[h.serverId].reports; h.confirms=byId[h.serverId].confirms;
+      h.expires=byId[h.serverId].expires;
+    });
+    const remote=(j.hazards||[]).filter(h=>!mineIds.has(h.id))
+                 .map(h=>makeHazard(Object.assign({},h,
+                    {mine:false,synced:true,serverId:h.id,iConfirmed:confirmed.has(h.id)})));
+    HAZARDS=HAZARDS.filter(h=>h.mine).concat(remote);
+    saveHazards(); renderHazards(); drawHazLayer(); renderTraffic();
+    CFG.hazLast=Date.now(); saveCfg();
+    if(!silent) toast('已取得附近 '+remote.length+' 筆回報');
+    return remote.length;
+  }catch(e){ if(!silent) toast('取得回報失敗：'+e.message,4000); return -1; }
+}
+
+/* ---------- 17f. 照片 EXIF 取座標（不保存照片） ---------- */
+function exifGPS(buf){
+  const dv=new DataView(buf);
+  if(dv.byteLength<12||dv.getUint16(0)!==0xFFD8) throw new Error('不是 JPEG 檔');
+  let off=2;
+  while(off<dv.byteLength-4){
+    if(dv.getUint8(off)!==0xFF) { off++; continue; }
+    const marker=dv.getUint8(off+1), len=dv.getUint16(off+2);
+    if(marker===0xE1){
+      if(dv.getUint32(off+4)!==0x45786966) { off+=2+len; continue; }
+      const tiff=off+10;
+      const le=dv.getUint16(tiff)===0x4949;
+      const u16=p=>dv.getUint16(p,le), u32=p=>dv.getUint32(p,le);
+      if(u16(tiff+2)!==42) throw new Error('EXIF 結構異常');
+      const ifd0=tiff+u32(tiff+4);
+      let gpsPtr=0;
+      const n0=u16(ifd0);
+      for(let i=0;i<n0;i++){ const e=ifd0+2+i*12;
+        if(u16(e)===0x8825) gpsPtr=tiff+u32(e+8); }
+      if(!gpsPtr) throw new Error('這張照片沒有 GPS 資訊');
+      const g={}, n=u16(gpsPtr);
+      for(let i=0;i<n;i++){
+        const e=gpsPtr+2+i*12, tag=u16(e), type=u16(e+2), cnt=u32(e+4);
+        const valOff=(cnt*(type===5?8:type===2?1:4)>4)?tiff+u32(e+8):e+8;
+        if(type===2){ let s=''; for(let j=0;j<cnt-1;j++) s+=String.fromCharCode(dv.getUint8(valOff+j)); g[tag]=s; }
+        else if(type===5){ const a=[]; for(let j=0;j<cnt;j++){
+          const num=u32(valOff+j*8), den=u32(valOff+j*8+4); a.push(den?num/den:0); } g[tag]=a; }
+      }
+      const dms=a=>Array.isArray(a)&&a.length>=3?a[0]+a[1]/60+a[2]/3600:null;
+      let lat=dms(g[2]), lon=dms(g[4]);
+      if(lat==null||lon==null) throw new Error('這張照片沒有 GPS 座標');
+      if(/S/i.test(g[1]||'')) lat=-lat;
+      if(/W/i.test(g[3]||'')) lon=-lon;
+      return {lat,lon,ts:g[29]||null};
+    }
+    if(marker===0xD8||marker===0x01||(marker>=0xD0&&marker<=0xD7)) off+=2;
+    else if(marker===0xDA) break;                 // 進到影像資料，後面沒有 EXIF 了
+    else off+=2+len;
+  }
+  throw new Error('這張照片沒有 EXIF 定位資訊');
+}
+
+/* ---------- 17g. 回報 UI 狀態 ---------- */
+let hazKindSel='掉落物', hazRoadSel='國道', hazLaneSel='', hazTargetKm=null, hazTargetPos=null;
+const LANES=['','內側車道','中線車道','外側車道','路肩','匝道'];
+
+function renderHazKinds(){
+  el('hazKind').innerHTML=HAZ_TYPES.map(x=>
+    `<button class="chip ${x.k===hazKindSel?'sel':''}" data-hk="${x.k}">${x.i} ${x.k}</button>`).join('');
+  el('hazRoadClass').innerHTML=ROAD_CLASSES.map(k=>
+    `<button class="chip ${k===hazRoadSel?'sel':''}" data-hrc="${k}">${k}</button>`).join('');
+  el('hazLane').innerHTML=LANES.map(k=>
+    `<button class="chip ${k===hazLaneSel?'sel':''}" data-hl="${k}">${k||'不指定'}</button>`).join('');
+  const v=(GPS.last&&GPS.last.speed)||0;
+  const T=hazTiers({roadClass:hazRoadSel},v);
+  const d=T[0]>=1000?(T[0]/1000).toFixed(1)+' 公里':Math.round(T[0])+' 公尺';
+  el('hazTarget').innerHTML= (hazTargetPos
+      ? `📌 位置：${hazTargetKm!=null?('<b>'+hazTargetKm.toFixed(1)+'K</b> · '):''}${hazTargetPos[0].toFixed(5)}, ${hazTargetPos[1].toFixed(5)}`
+      : '📌 位置：<b>目前 GPS 位置</b>（可用上面的樁號或照片指定）')
+    + `<br>🔔 這個類別會在 <b>${d}</b> 外開始提醒`
+    + (isFastRoad(hazRoadSel)?'（時速越快提醒越早，換算約 90 秒車程）':'（一般道路固定 500 公尺起）');
+}
+
+function renderKm(){
+  const pos=GPS.last, est=kmEstimate(pos);
+  if(!pos||est.conf==='none'){
+    el('kmNow').classList.add('hidden');
+    el('kmRoad').textContent= pos? '尚未知道你在幾 K' : '等待 GPS 定位…';
+    el('kmConf').textContent= pos
+      ? '附近沒有可對照的里程錨點。匯入國道資料後會自動推估，或直接按右邊「校正為現在位置」輸入路邊里程牌的數字。'
+      : '開啟定位後才能推估樁號。';
+    el('kmChips').innerHTML=''; return;
+  }
+  el('kmNow').classList.remove('hidden');
+  el('kmNow').textContent=est.km.toFixed(1);
+  el('kmRoad').textContent=(est.road||'道路')+(est.dir?' · '+est.dir:'');
+  el('kmConf').textContent= est.conf==='locked'? '已校正，跟著車推進 '+est.acc : '推估值 '+est.acc;
+  const list=kmChoices(est,pos);
+  el('kmChips').innerHTML=list.map(k=>{
+    const now=Math.abs(k-est.km)<0.05, sel=hazTargetKm!=null&&Math.abs(k-hazTargetKm)<0.05;
+    const past=k<est.km-0.05;
+    return `<button data-km="${k}" class="${sel?'sel':now?'now':past?'past':''}">${k.toFixed(1)}</button>`;
+  }).join('');
+  // 自動捲到目前位置，讓「前方還沒到的樁號」留在視線內
+  const cur=el('kmChips').querySelector('.now')||el('kmChips').querySelector('.sel');
+  if(cur) el('kmChips').scrollLeft=Math.max(0,cur.offsetLeft-el('kmChips').clientWidth*0.22);
+}
+
+function repBadge(h){
+  const n=h.reports||1;
+  const cls=n>=5?'rb hot':n>=3?'rb warm':n>=2?'rb':'rb one';
+  return `<span class="${cls}">${n} 人回報</span>`;
+}
+function scoreBadge(sc){
+  const cls=sc>=SCORE_SPEAK?'sb ok':sc>=SCORE_SHOW?'sb mid':'sb low';
+  return `<span class="${cls}">${scoreLabel(sc)}</span>`;
+}
+function renderHazards(){
+  const now=Date.now();
+  const live=HAZARDS.filter(h=>h.expires>now&&hazScore(h,now)>=SCORE_SHOW)
+                    .sort((a,b)=>hazScore(b,now)-hazScore(a,now));
+  el('hazCount').textContent=live.length+' 筆';
+  el('hazList').innerHTML= live.length? live.map(h=>{
+    const m=hazMeta(h.type), mins=Math.max(0,Math.round((h.expires-now)/60000));
+    const sc=hazScore(h,now), canVote=!!CFG.hazUrl&&!!h.serverId;
+    const p=h.probes||{};
+    const probeTxt=(p.clear||p.still)
+      ? ` · 車流 ${p.still||0} 慢 / ${p.clear||0} 沒慢` : '';
+    return `<div class="item">
+      <div class="t">${m.i} ${esc(h.type)} ${repBadge(h)} ${scoreBadge(sc)}${h.lane?' · '+esc(h.lane):''}${h.note?' · '+esc(h.note):''}</div>
+      <div class="m">${h.km!=null?esc(h.road?h.road+' ':'')+h.km.toFixed(1)+'K · ':''}${esc(h.roadClass)} ·
+        ${h.mine?'我回報的':'他人回報'}${h.mine?(h.synced?' · 已上傳':' · 未上傳'):''}
+        · ${Math.round((now-(h.lastReport||h.t))/60000)} 分鐘前${probeTxt}
+        ${h.official==='open'?' · <span class="tag sec">官方確認中</span>':''}</div>
+      <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">
+        ${h.mine
+          ? `<button class="btn sm danger" data-hazretract="${esc(h.id)}">↩︎ 撤銷（我按錯了）</button>`
+          : `${(canVote&&!h.iConfirmed)?`<button class="btn sm" data-hazok="${esc(h.id)}">👀 我也看到了</button>`:''}
+             ${h.iConfirmed?`<span class="tag usr">已確認</span>`:''}
+             <button class="btn sm" data-hazclear="${esc(h.id)}">✅ 已經清掉了</button>`}
+      </div></div>`;
+  }).join('') : '<div class="empty">目前沒有事件。<br>看到掉落物時，用地圖頁右下角的紅色按鈕一鍵通報。</div>';
+}
+
+let hazLayer=null;
+function drawHazLayer(){
+  if(!MAP) return;
+  if(!hazLayer) hazLayer=L.layerGroup().addTo(MAP);
+  hazLayer.clearLayers();
+  const now=Date.now();
+  HAZARDS.filter(h=>h.expires>now).forEach(h=>{
+    const m=hazMeta(h.type);
+    const n=h.reports||1, sz=n>=5?32:n>=3?27:22;
+    L.marker([h.lat,h.lon],{icon:L.divIcon({className:'',html:
+      `<div style="font-size:${sz}px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.8));position:relative">${m.i}`+
+      (n>=2?`<span style="position:absolute;top:-4px;right:-9px;background:#e02f2f;color:#fff;border-radius:9px;
+        padding:0 5px;font-size:10px;font-weight:700;line-height:15px">${n}</span>`:'')+`</div>`,
+      iconSize:[sz+4,sz+4],iconAnchor:[(sz+4)/2,(sz+4)/2]})})
+     .bindPopup(`<b>${esc(h.type)}</b> · ${h.reports||1} 人回報${h.lane?' · '+esc(h.lane):''}<br>`+
+       (h.km!=null?esc(h.road?h.road+' ':'')+h.km.toFixed(1)+'K<br>':'')+
+       esc(h.note||'')+'<br><small>'+new Date(h.t).toLocaleTimeString('zh-TW',{hour12:false})+'</small>')
+     .addTo(hazLayer);
+  });
+}
+
+function paintHazRow(a){
+  const row=el('hazRow');
+  if(!a){ row.className=''; return; }
+  const m=hazMeta(a.haz.type);
+  row.className='show'+(a.tier===3?' t3':'');
+  el('hazIc').textContent=m.i;
+  const rep=a.haz.reports||1;
+  const low=(a.score!=null?a.score:hazScore(a.haz))<SCORE_SPEAK;
+  if(low) row.className+=' faded';
+  el('hazTx').textContent=a.haz.type+(low?'（待確認）':'')+(rep>=2?' · '+rep+'人回報':'')+
+    (a.haz.lane?' · '+a.haz.lane:'')+
+    (a.haz.km!=null?' · '+(a.haz.road?a.haz.road+' ':'')+a.haz.km.toFixed(1)+'K':'');
+  el('hazDd').textContent= a.d<1000? Math.round(a.d/10)*10+'m' : (a.d/1000).toFixed(1)+'km';
+}
+
+function paintSecRow(){
+  const row=el('secRow');
+  if(!SECTION){ row.className=''; return; }
+  const s=SECTION, lim=s.limit||0, avg=Math.round(s.avg||0), over=lim>0&&avg>lim+1;
+  row.className='show'+(over?' over':'');
+  const rest=(s.maxRemain!=null&&lim>0&&s.remainM>50)
+    ? '　剩 '+fmtKm(s.remainM)+'　可跑 '+Math.round(s.maxRemain)
+    : (s.remainM!=null? '　剩 '+fmtKm(s.remainM) : '');
+  el('secRowTx').textContent='區間測速'+(lim?(' 速限'+lim):'')+rest;
+  el('secRowAvg').textContent=avg+'　';
+  el('secRowAvg').style.color=over?'var(--danger)':'var(--ok)';
+}
+
+/* 「其他類型」選單。開著卻沒選就是擋住畫面，所以跟「復原」一樣給 6 秒，
+   時間到自動收回；上緣有一條倒數條，看得出來還剩多久。 */
+const FAB_MENU_MS=6000;
+let fabMenuTimer=null;
+const fabMenuOpen=()=>!el('fabMenu').classList.contains('hidden');
+
+function openFabMenu(){
+  const m=el('fabMenu');
+  m.style.setProperty('--fabms',FAB_MENU_MS+'ms');
+  m.innerHTML='<div id="fabMenuBar"><i></i></div>'+
+    HAZ_TYPES.map(x=>`<button data-fq="${esc(x.k)}"><b>${x.i}</b>${esc(x.k)}</button>`).join('');
+  m.classList.remove('hidden');
+  armFabMenu();
+}
+
+/** 重新開始 6 秒倒數（開啟時、或使用者又碰了選單時） */
+function armFabMenu(){
+  if(!fabMenuOpen()) return;
+  clearTimeout(fabMenuTimer);
+  const bar=el('fabMenu').querySelector('#fabMenuBar i');
+  if(bar){ bar.classList.remove('run'); void bar.offsetWidth; bar.classList.add('run'); }
+  fabMenuTimer=setTimeout(closeFabMenu,FAB_MENU_MS);
+}
+
+function closeFabMenu(){
+  clearTimeout(fabMenuTimer); fabMenuTimer=null;
+  el('fabMenu').classList.add('hidden');
+  el('fabMenu').innerHTML='';
+}
+
+/* 一鍵通報：立刻建立，給 6 秒可以反悔。掉落物通常是「剛剛」經過的，
+   所以位置往回退一點點，比標在當下位置更接近實際。 */
+let undoTimer=null, undoId=null;
+function quickReport(type){
+  closeFabMenu();
+  const pos=GPS.last;
+  if(!pos){ toast('尚未取得 GPS 位置'); return; }
+  const back=Math.min(120,Math.max(30,(pos.speed||0)*2.5));   // 反應時間約 2.5 秒
+  const hd=(pos.heading!=null&&!isNaN(pos.heading))?pos.heading:0;
+  const [lat,lon]=destPoint(pos.lat,pos.lon,(hd+180)%360,back);
+  const fast=(pos.speed||0)*3.6>=70;
+  const est=kmEstimate(pos);
+  const h=addHazard({type,lat,lon,brg:hd,
+    roadClass: fast? (est.road&&/^國/.test(est.road)?'國道':'高架/快速道路') : '一般道路',
+    road: est.road||'', dir: est.dir||dirLabel(hd),
+    km: est.conf!=='none'? Math.round((est.km-back/1000)*10)/10 : null});
+  Audio_.beep(880,.1); Audio_.vibe([60,40,60]);
+  undoId=h.id; clearTimeout(undoTimer);
+  const t=el('toast');
+  t.innerHTML=`已通報 <b>${esc(type)}</b> <button id="undoBtn" class="btn sm" style="margin-left:10px">復原</button>`;
+  t.classList.add('show'); t.style.pointerEvents='auto';
+  el('undoBtn').onclick=()=>{ removeHazard(undoId); t.classList.remove('show');
+    t.style.pointerEvents='none'; toast('已復原'); };
+  undoTimer=setTimeout(()=>{ t.classList.remove('show'); t.style.pointerEvents='none'; },6000);
+}
+
+/* ── 一鍵加入測速點 ──────────────────────────────────────────
+   跟掉落物／事故不同：測速點不是會過期的路況，而是要長期留在資料庫裡的點位。
+   所以它走 REPORTS（本機點位）而不是 HAZARDS（會衰減下架的回報）。
+   rebuildDB() 會把 kind 為「測速點／科技執法／臨檢」的回報併進 CAMS，
+   按完立刻就會納入前方警示。
+
+   位置一樣往回退約 2.5 秒車程 —— 通常是「看到了、經過了」才按得下去。
+   按錯有 6 秒可以復原。 */
+function quickCam(kind){
+  closeFabMenu();
+  const pos=GPS.last;
+  if(!pos){ toast('尚未取得 GPS 位置，無法加入測速點'); return; }
+  if(pos.speedOk===false&&GPSQ.level==='unusable'){
+    toast('定位品質不足，這個點會標得很不準 —— 建議停車後再用地圖選點',5200); return;
+  }
+  kind=kind||'測速點';
+  const back=Math.min(120,Math.max(20,(pos.speed||0)*2.5));
+  const hd=(pos.heading!=null&&!isNaN(pos.heading))?pos.heading:0;
+  const [lat,lon]=destPoint(pos.lat,pos.lon,(hd+180)%360,back);
+  const est=kmEstimate(pos);
+  // 備註自動帶入樁號與方向，之後匯出 GeoJSON 時才看得懂這筆是哪裡
+  const bits=[];
+  if(est.conf!=='none'&&est.road) bits.push(est.road+' '+(Math.round((est.km-back/1000)*10)/10)+'K');
+  bits.push(est.dir||dirLabel(hd));
+  const r={id:'r'+Date.now(),lat,lon,kind,lim:0,note:bits.join(' '),t:Date.now()};
+  REPORTS.unshift(r); Store.set(K('reports'),REPORTS);
+  rebuildDB(); renderReports(); renderTraffic();
+  Audio_.beep(1040,.1); Audio_.vibe([50,40,50]);
+  camUndoId=r.id; clearTimeout(camUndoTimer);
+  const t=el('toast');
+  t.innerHTML=`已加入 <b>${esc(kind)}</b>${bits.length?' <span style="opacity:.75">'+esc(bits.join(' '))+'</span>':''}
+    <button id="camUndoBtn" class="btn sm" style="margin-left:10px">復原</button>`;
+  t.classList.add('show'); t.style.pointerEvents='auto';
+  el('camUndoBtn').onclick=()=>{
+    REPORTS=REPORTS.filter(x=>x.id!==camUndoId); Store.set(K('reports'),REPORTS);
+    rebuildDB(); renderReports(); renderTraffic();
+    t.classList.remove('show'); t.style.pointerEvents='none'; toast('已復原');
+  };
+  camUndoTimer=setTimeout(()=>{ t.classList.remove('show'); t.style.pointerEvents='none'; },6000);
+}
+let camUndoId=null, camUndoTimer=null;
+
+/* ═══════════════════════════════════════════════════════════
+   17g2. 路網幾何
+   有了道路中心線，就能把「前方」從航向錐形改成沿著路彎過去，
+   里程也能用沿路距離而不是直線 —— 山區彎道差很多。
+   資料由 etl/build_roadnet.py 從 OpenStreetMap 產生（ODbL）。
+   沒有載入路網時所有功能自動退回原本的直線／錐形做法。
+   ═══════════════════════════════════════════════════════════ */
+const ROADNET={roads:[],grid:null,cell:0.01,loaded:false};
+
+function loadRoadNet(arr){
+  if(!Array.isArray(arr)||!arr.length) throw new Error('路網資料是空的');
+  const roads=[], grid=new Map();
+  arr.forEach(r=>{
+    const pts=r.pts;
+    if(!Array.isArray(pts)||pts.length<2) return;
+    // 每個點的累積沿路距離，之後算「沿路多遠」只要相減
+    const cum=new Float64Array(pts.length);
+    for(let i=1;i<pts.length;i++)
+      cum[i]=cum[i-1]+dist(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]);
+    const idx=roads.length;
+    roads.push({id:r.id,ref:r.ref,cls:r.cls||'',pts,cum,lenM:cum[cum.length-1]});
+    // 網格索引：每個線段登記到它經過的格子
+    for(let i=0;i<pts.length;i++){
+      const gx=Math.floor(pts[i][0]/ROADNET.cell), gy=Math.floor(pts[i][1]/ROADNET.cell);
+      const k=gx+'_'+gy;
+      let a=grid.get(k); if(!a){ a=[]; grid.set(k,a); }
+      a.push([idx,i]);
+    }
+  });
+  ROADNET.roads=roads; ROADNET.grid=grid; ROADNET.loaded=roads.length>0;
+  return roads.length;
+}
+
+/** 點到線段的最近點，回傳 {d, t}（t=0~1 在線段上的比例） */
+function segNearest(lat,lon,a,b){
+  const kx=111320*Math.cos(rad(lat)), ky=110540;
+  const px=(lon-a[1])*kx, py=(lat-a[0])*ky;
+  const bx=(b[1]-a[1])*kx, by=(b[0]-a[0])*ky;
+  const L2=bx*bx+by*by;
+  if(L2===0) return {d:Math.hypot(px,py),t:0};
+  const t=Math.max(0,Math.min(1,(px*bx+py*by)/L2));
+  return {d:Math.hypot(px-t*bx,py-t*by),t};
+}
+
+/**
+ * 把座標貼到最近的道路上。
+ * 回傳 {roadIdx, ref, cls, alongM, offsetM, brg} 或 null。
+ * alongM = 從路線起點沿路走了多遠（公尺）
+ * offsetM = 離路中心線多遠（判斷是不是真的在這條路上）
+ */
+function snapToRoad(lat,lon,maxOffM){
+  if(!ROADNET.loaded) return null;
+  const max=maxOffM||120;
+  const gx=Math.floor(lat/ROADNET.cell), gy=Math.floor(lon/ROADNET.cell);
+  const seen=new Set(); let best=null;
+  for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
+    const a=ROADNET.grid.get((gx+dx)+'_'+(gy+dy));
+    if(!a) continue;
+    for(const [ri,pi] of a){
+      const r=ROADNET.roads[ri];
+      // 檢查這個點前後兩條線段
+      for(const i of [pi-1,pi]){
+        if(i<0||i>=r.pts.length-1) continue;
+        const key=ri+':'+i; if(seen.has(key)) continue; seen.add(key);
+        const {d,t}=segNearest(lat,lon,r.pts[i],r.pts[i+1]);
+        if(d>max) continue;
+        if(!best||d<best.offsetM){
+          const segLen=r.cum[i+1]-r.cum[i];
+          best={roadIdx:ri,ref:r.ref,cls:r.cls,offsetM:d,
+                alongM:r.cum[i]+segLen*t,
+                brg:bearing(r.pts[i][0],r.pts[i][1],r.pts[i+1][0],r.pts[i+1][1])};
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/** 我目前在這條路上是往 alongM 增加(+1)還是減少(-1)的方向走 */
+function roadDirSign(snap,heading){
+  if(heading==null||isNaN(heading)) return 1;
+  return angDiff(snap.brg,heading)<=90 ? 1 : -1;
+}
+
+/** 沿路距離；貼不到同一條路時回傳 null，呼叫端自行退回直線距離 */
+function alongDistance(aLat,aLon,bLat,bLon){
+  const A=snapToRoad(aLat,aLon), B=snapToRoad(bLat,bLon);
+  if(!A||!B||A.roadIdx!==B.roadIdx) return null;
+  return Math.abs(B.alongM-A.alongM);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   17h. 區間測速
+   區間測速抓的是「平均速度」，所以只提示位置沒有用 ——
+   真正要算的是你進入區間後到現在的平均時速，以及剩下這段
+   還能跑多快才不會被開單。
+   起訖里程就寫在開放資料的名稱裡，例如
+     「台9線68k+600m至56k+600m」→ 長度 12 公里
+     「台3線82.2公里至84.3公里」  → 長度 2.1 公里
+   ═══════════════════════════════════════════════════════════ */
+
+/** 從名稱解析區間的起訖里程。回傳 {fromKm,toKm,lengthM} 或 null（有些沒寫範圍）。 */
+function parseSection(name){
+  if(!name) return null;
+  const s=String(name);
+  // 一個里程數字：47.5K / 68k+600m / 82.2公里
+  const one='(\\d{1,3}(?:\\.\\d+)?)\\s*(?:[Kk](?![a-z])|公里)(?:\\s*\\+\\s*(\\d{1,3})\\s*[Mm公尺])?';
+  // 「至」和第二個里程之間可能還夾著路名，例如
+  // 「南澳鄉台9線110k+960m至蘇澳鎮台9線108k+224m」
+  const re=new RegExp(one+'\\s*(?:至|到|~|-|–|—)\\s*.{0,16}?'+one);
+  const m=s.match(re);
+  if(!m) return null;
+  const a=parseFloat(m[1])+(m[2]?parseInt(m[2],10)/1000:0);
+  const b=parseFloat(m[3])+(m[4]?parseInt(m[4],10)/1000:0);
+  if(!isFinite(a)||!isFinite(b)) return null;
+  const len=Math.abs(b-a);
+  if(len<=0.05||len>60) return null;                 // 太短或太長都當作解析失敗
+  return {fromKm:a,toKm:b,lengthM:Math.round(len*1000)};
+}
+
+/** 目前正在進行中的區間測速 */
+let SECTION=null;
+/* SECTION = {cam, lengthM, limit, startT, distM, lastLat, lastLon, warned, name} */
+
+function sectionEnter(cam,pos){
+  const info=parseSection(cam.name);
+  SECTION={cam, name:cam.name, limit:cam.lim||0,
+           lengthM: info? info.lengthM : null,
+           range: info? (info.fromKm+'K → '+info.toKm+'K') : '',
+           startT:Date.now(), distM:0, lastLat:pos.lat, lastLon:pos.lon,
+           warned:false, over:false};
+  const km=SECTION.lengthM? (SECTION.lengthM/1000).toFixed(1)+'公里' : '';
+  Audio_.say('進入區間測速'+(km?('，全長'+km):'')+(cam.lim?('，速限'+cam.lim):''));
+  Audio_.beep(700,.18); Audio_.vibe([90,60,90]);
+  renderTrip();
+}
+
+function sectionUpdate(pos){
+  if(!SECTION) return null;
+  const d=dist(SECTION.lastLat,SECTION.lastLon,pos.lat,pos.lon);
+  if(d>0){ SECTION.distM+=d; SECTION.lastLat=pos.lat; SECTION.lastLon=pos.lon; }
+  const el_=Math.max(1,(Date.now()-SECTION.startT)/1000);          // 秒
+  SECTION.avg=SECTION.distM/el_*3.6;                                // km/h
+  SECTION.elapsed=el_;
+  if(SECTION.lengthM){
+    SECTION.remainM=Math.max(0,SECTION.lengthM-SECTION.distM);
+    if(SECTION.limit>0){
+      // 整段跑完不超速的話，總共可以用掉多少時間
+      const budget=SECTION.lengthM/(SECTION.limit/3.6);
+      const left=budget-el_;
+      SECTION.maxRemain = left>1 ? Math.min(200,SECTION.remainM/left*3.6) : 0;
+    }
+    if(SECTION.distM>=SECTION.lengthM) return sectionExit(true);
+    // 開過頭太多（例如中途下交流道又上來）就放棄這次計算
+    if(SECTION.distM>SECTION.lengthM*1.8) return sectionExit(false);
+  } else if(SECTION.distM>30000) return sectionExit(false);         // 沒長度資訊時的保險
+
+  // 平均已經超速 → 提醒一次；之後每降回安全再超速才會再提醒
+  if(SECTION.limit>0){
+    if(SECTION.avg>SECTION.limit+1&&!SECTION.warned){
+      SECTION.warned=true; SECTION.over=true;
+      Audio_.say('注意，區間平均時速'+Math.round(SECTION.avg)+'，已超過速限'+SECTION.limit);
+      Audio_.beep(1000,.22,.13); Audio_.vibe([140,70,140]);
+    } else if(SECTION.avg<SECTION.limit-3&&SECTION.warned){
+      SECTION.warned=false;
+    }
+  }
+  return SECTION;
+}
+
+function sectionExit(completed){
+  if(!SECTION) return null;
+  const s=SECTION, avg=Math.round(s.avg||0);
+  if(completed&&s.limit>0){
+    if(avg>s.limit+1) Audio_.say('區間測速結束，平均時速'+avg+'，超過速限'+s.limit);
+    else Audio_.say('區間測速結束，平均時速'+avg+'，沒有超速');
+  }
+  TRIP.sections.unshift({name:s.name,range:s.range,limit:s.limit,avg,
+    lengthM:s.lengthM,distM:Math.round(s.distM),elapsed:Math.round(s.elapsed||0),
+    completed:!!completed,over:s.limit>0&&avg>s.limit+1,t:Date.now()});
+  SECTION=null; saveTrip(); renderTrip();
+  return null;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   17i. 旅程記錄
+   ═══════════════════════════════════════════════════════════ */
+const newTrip=()=>({startT:Date.now(),distM:0,maxSpd:0,movingMs:0,
+                    passed:[],sections:[],lastLat:null,lastLon:null,lastT:null});
+let TRIP=Store.get(K('trip'),null)||newTrip();
+const saveTrip=()=>Store.set(K('trip'),TRIP);
+let tripSaveT=0;
+
+/** 追蹤接近中的測速點，等它被拋在後面時記下「通過時的車速」 */
+const nearCam=new Map();
+
+function updateTrip(pos){
+  const now=Date.now(), v=pos.speed||0;
+  if(TRIP.lastLat!=null){
+    const d=dist(TRIP.lastLat,TRIP.lastLon,pos.lat,pos.lon);
+    if(d>0&&d<2000){                                   // 跳過 GPS 亂跳
+      TRIP.distM+=d;
+      if(v>1) TRIP.movingMs+=Math.min(10000,now-(TRIP.lastT||now));
+    }
+  }
+  TRIP.lastLat=pos.lat; TRIP.lastLon=pos.lon; TRIP.lastT=now;
+  if(v*3.6>TRIP.maxSpd) TRIP.maxSpd=v*3.6;
+
+  // 通過偵測
+  for(const c of CAMS){
+    if(Math.abs(c.lat-pos.lat)>0.004||Math.abs(c.lon-pos.lon)>0.005) continue;
+    const d=dist(pos.lat,pos.lon,c.lat,c.lon);
+    if(d<200){
+      const rec=nearCam.get(c.id)||{minD:1e9,spd:0,dir:c.dir};
+      if(d<rec.minD){ rec.minD=d; rec.spd=v*3.6; }
+      nearCam.set(c.id,rec);
+    }
+  }
+  for(const [id,rec] of Array.from(nearCam)){
+    const c=CAMS.find(x=>x.id===id);
+    if(!c){ nearCam.delete(id); continue; }
+    const d=dist(pos.lat,pos.lon,c.lat,c.lon);
+    if(d>260&&rec.minD<120){
+      nearCam.delete(id);
+      if(!TRIP.passed.some(p=>p.id===id)){
+        TRIP.passed.unshift({id,name:c.name,lim:c.lim,sec:c.sec,
+          spd:Math.round(rec.spd),over:c.lim>0&&rec.spd>c.lim+2,t:Date.now()});
+        if(TRIP.passed.length>200) TRIP.passed.length=200;
+      }
+    } else if(d>400) nearCam.delete(id);
+  }
+
+  // 區間測速進出
+  if(SECTION) sectionUpdate(pos);
+  else {
+    for(const c of CAMS){
+      if(!c.sec) continue;
+      if(Math.abs(c.lat-pos.lat)>0.003||Math.abs(c.lon-pos.lon)>0.004) continue;
+      if(!dirMatch(c,pos.heading)) continue;
+      if(dist(pos.lat,pos.lon,c.lat,c.lon)<150&&v>2){
+        // 這趟已經跑過同一個區間就不重複起算
+        if(!TRIP.sections.some(s=>s.name===c.name&&Date.now()-s.t<20*60e3)){
+          sectionEnter(c,pos); break;
+        }
+      }
+    }
+  }
+
+  if(now-tripSaveT>15000){ tripSaveT=now; saveTrip(); }
+}
+
+/**
+ * 前方的測速點。
+ * 有載入路網 → 沿著同一條路往前找，彎道也跟得上，距離用沿路距離。
+ * 沒有路網   → 退回航向 ±35° 的錐形（原本的做法）。
+ */
+function upcomingCams(pos,maxKm){
+  if(!pos) return [];
+  const maxM=(maxKm||20)*1000;
+  const dLat=maxM/111320*1.3, dLon=maxM/(111320*Math.max(0.2,Math.cos(rad(pos.lat))))*1.3;
+  const near=[];
+  for(const c of CAMS){
+    if(Math.abs(c.lat-pos.lat)>dLat||Math.abs(c.lon-pos.lon)>dLon) continue;
+    if(!dirMatch(c,pos.heading)) continue;
+    near.push(c);
+  }
+
+  const me=ROADNET.loaded? snapToRoad(pos.lat,pos.lon,120) : null;
+  const out=[], done=new Set();
+
+  if(me){
+    const sign=roadDirSign(me,pos.heading);
+    for(const c of near){
+      const cs=snapToRoad(c.lat,c.lon,80);
+      if(!cs||cs.roadIdx!==me.roadIdx) continue;
+      const ahead=(cs.alongM-me.alongM)*sign;      // 正值＝在前方
+      if(ahead<=20||ahead>maxM) continue;
+      done.add(c.id);
+      out.push({cam:c,d:ahead,onRoad:true,ref:me.ref});
+    }
+  }
+
+  // 沒貼到路的（市區道路、或根本沒載路網）走原本的錐形判斷
+  for(const c of near){
+    if(done.has(c.id)) continue;
+    if(me&&snapToRoad(c.lat,c.lon,80)) continue;   // 貼在別條路上 → 不是我要走的路
+    const d=dist(pos.lat,pos.lon,c.lat,c.lon);
+    if(d>maxM||d<20) continue;
+    if(pos.heading!=null&&!isNaN(pos.heading)){
+      if(angDiff(bearing(pos.lat,pos.lon,c.lat,c.lon),pos.heading)>35) continue;
+    }
+    out.push({cam:c,d,onRoad:false});
+  }
+  return out.sort((a,b)=>a.d-b.d).slice(0,25);
+}
+
+/* ---------- 17j. 旅程 UI ---------- */
+const fmtDur=ms=>{ const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor(s%3600/60);
+  return h? h+'小時'+String(m).padStart(2,'0')+'分' : m+'分'+String(s%60).padStart(2,'0')+'秒'; };
+const fmtKm=m=> m<1000? Math.round(m)+' m' : (m/1000).toFixed(1)+' km';
+
+function renderTrip(){
+  if(!el('tripStats')) return;
+  // ── 區間測速卡 ──
+  const card=el('secCard');
+  if(SECTION){
+    card.style.display='';
+    const s=SECTION, avg=s.avg||0, lim=s.limit||0;
+    const over=lim>0&&avg>lim+1;
+    el('secRange').textContent=(s.range||'')+(s.lengthM?('　全長 '+(s.lengthM/1000).toFixed(1)+' 公里'):'　長度未知');
+    el('secAvg').textContent=Math.round(avg); el('secAvg').className=over?'over':'';
+    el('secLim').textContent=lim||'--';
+    const pct=s.lengthM? Math.min(100,s.distM/s.lengthM*100) : 0;
+    el('secBarFill').style.width=pct+'%';
+    el('secBarFill').className=over?'over':'';
+    el('secProg').textContent=fmtKm(s.distM)+(s.lengthM?(' / '+fmtKm(s.lengthM)):'');
+    el('secRemain').textContent=s.remainM!=null? fmtKm(s.remainM) : '—';
+    el('secMax').textContent= (s.maxRemain!=null&&lim>0)
+      ? (s.maxRemain<=0? '已經來不及了，維持速限即可' : Math.round(s.maxRemain)+' km/h')
+      : '—';
+    el('secHint').innerHTML= !s.lengthM
+      ? '這個區間的資料沒有寫起訖里程，只能顯示平均時速，無法算剩餘距離。'
+      : (over
+        ? '⚠️ 平均已超過速限。<b>放慢也救得回來</b> —— 區間測速算的是整段平均，把剩下這段壓在上面那個數字以下就不會被開單。'
+        : '目前平均在速限內。');
+  } else card.style.display='none';
+
+  // ── 旅程摘要 ──
+  const dur=Date.now()-TRIP.startT;
+  const avgAll=TRIP.movingMs>1000? (TRIP.distM/(TRIP.movingMs/1000)*3.6) : 0;
+  el('tripSince').textContent=new Date(TRIP.startT).toLocaleString('zh-TW',{hour12:false}).slice(5)+' 起';
+  const over=TRIP.passed.filter(p=>p.over).length;
+  el('tripStats').innerHTML=[
+    ['里程', fmtKm(TRIP.distM)],
+    ['時間', fmtDur(dur)],
+    ['行駛平均', Math.round(avgAll)+'<small>km/h</small>'],
+    ['最高', Math.round(TRIP.maxSpd)+'<small>km/h</small>'],
+    ['經過測速點', TRIP.passed.length+'<small>個</small>'],
+    ['其中超速', over+'<small>次</small>'],
+  ].map(([k,v])=>`<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+
+  // ── 前方 ──
+  const up=upcomingCams(GPS.last,20);
+  el('upCount').textContent=up.length? up.length+' 個' : '';
+  el('upList').innerHTML= up.length? up.map(({cam,d,onRoad,ref})=>{
+    const secInfo=cam.sec? parseSection(cam.name) : null;
+    return `<div class="item"><div class="t">${cam.sec?'📏':'📷'} ${esc(cam.name)}
+        ${cam.sec?'<span class="tag sec">區間測速</span>':''}</div>
+      <div class="m">${onRoad?'沿路 ':''}${fmtKm(d)}${onRoad&&ref?' · '+esc(ref):''}${cam.lim?' · 速限 '+cam.lim:''}${cam.dir?' · '+esc(cam.dir):''}
+        ${secInfo?' · 全長 '+(secInfo.lengthM/1000).toFixed(1)+' 公里':''}</div></div>`;
+  }).join('') : `<div class="empty">${GPS.last?'前方 20 公里內沒有測速點<br><span style="font-size:11px">（只列出與行進方向相符的）</span>':'等待 GPS 定位…'}</div>`;
+
+  // ── 已經過 ──
+  el('passCount').textContent=TRIP.passed.length? TRIP.passed.length+' 個' : '';
+  el('passList').innerHTML= TRIP.passed.length? TRIP.passed.slice(0,60).map(p=>
+    `<div class="item"><div class="t">${p.sec?'📏':'📷'} ${esc(p.name)}</div>
+      <div class="m">通過時 <b style="color:${p.over?'var(--danger)':'var(--ok)'}">${p.spd} km/h</b>
+      ${p.lim?' · 速限 '+p.lim:''} ·
+      ${p.over?'<span class="over-badge">超速</span>':'<span class="ok-badge">未超速</span>'} ·
+      ${new Date(p.t).toLocaleTimeString('zh-TW',{hour12:false})}</div></div>`).join('')
+    : '<div class="empty">還沒有經過任何測速點</div>';
+
+  // ── 區間紀錄 ──
+  el('secCount').textContent=TRIP.sections.length? TRIP.sections.length+' 段' : '';
+  el('secList').innerHTML= TRIP.sections.length? TRIP.sections.map(s=>
+    `<div class="item"><div class="t">📏 ${esc(s.name)}</div>
+      <div class="m">平均 <b style="color:${s.over?'var(--danger)':'var(--ok)'}">${s.avg} km/h</b>
+      ${s.limit?' · 速限 '+s.limit:''} ·
+      ${s.over?'<span class="over-badge">超速</span>':'<span class="ok-badge">未超速</span>'}
+      · ${fmtKm(s.distM)} / ${fmtDur(s.elapsed*1000)}
+      ${s.completed?'':' · <span class="tag">未跑完</span>'}</div></div>`).join('')
+    : '<div class="empty">本趟還沒有經過區間測速</div>';
+}
+
+/* ---------- 17k. 路網載入 ---------- */
+function roadStatus(msg){
+  el('roadStat').textContent= ROADNET.loaded? (ROADNET.roads.length+' 段') : '未載入';
+  if(msg!==undefined) el('roadMsg').textContent=msg;
+}
+function applyRoadNet(arr,label){
+  const n=loadRoadNet(arr);
+  const refs=Array.from(new Set(ROADNET.roads.map(r=>r.ref))).slice(0,12);
+  CFG.roadCount=n; saveCfg();
+  try{ Store.set(K('roadnet'),arr); }
+  catch(e){ toast('路網太大無法保存，本次開啟仍可使用',4000); }
+  roadStatus('✅ 已載入 '+n+' 段：'+refs.join('、')+(refs.length>=12?' …':''));
+  toast('路網已載入，前方清單改用沿路計算');
+  renderTrip();
+  return n;
+}
+async function roadLoadUrl(){
+  const url=(el('roadUrl').value||'').trim();
+  CFG.roadUrl=url; saveCfg();
+  if(!url){ toast('請先填入網址'); return; }
+  roadStatus('載入中…');
+  try{
+    const r=await fetch(url,{cache:'no-cache'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    applyRoadNet(await r.json(),url);
+  }catch(e){ roadStatus('❌ '+e.message+'（政府或第三方網址可能被 CORS 擋，改用檔案匯入）'); }
+}
+
+/* ---------- 18. 資料來源列表 ---------- */
+function renderSources(){
+  const groups=[];
+  SOURCES.forEach((s,i)=>{ let g=groups.find(x=>x.g===s.g); if(!g){g={g:s.g,items:[]};groups.push(g);} g.items.push([s,i]); });
+  el('srcList').innerHTML=groups.map(gr=>
+    `<div style="margin:12px 0 4px;font-size:11px;letter-spacing:2px;color:var(--accent)">${esc(gr.g)}</div>`+
+    gr.items.map(([s,i])=>
+    `<div class="item"><div class="t">${esc(s.n)}</div><div class="m">${esc(s.d)}</div>
+     <div style="margin-top:7px;display:flex;gap:7px;flex-wrap:wrap">
+       <a class="btn sm" href="${s.u}" target="_blank" rel="noopener" style="text-decoration:none">開啟資料集頁面</a>
+       ${s.f?`<a class="btn sm" href="${s.f}" target="_blank" rel="noopener" style="text-decoration:none">下載檔案</a>
+             <button class="btn sm" data-fetch="${i}">直接抓取</button>`:''}
+     </div></div>`).join('')).join('');
+}
+
+/* ---------- 19. 綁定 ---------- */
+function bind(){
+  // tabs
+  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+    closeFabMenu();
+    b.classList.add('active'); el('v-'+b.dataset.v).classList.add('active');
+    if(b.dataset.v==='map'&&MAP) setTimeout(()=>MAP.invalidateSize(),80);
+    if(b.dataset.v==='traffic') renderTraffic();
+    if(b.dataset.v==='report'){ renderKm(); renderHazKinds(); renderHazards(); }
+    if(b.dataset.v==='trip') renderTrip();
+  });
+  // gate
+  el('btnStart').onclick=()=>{ Audio_.unlock(); startGPS(); el('gate').classList.add('hidden');
+    setTimeout(()=>{ if(MAP)MAP.invalidateSize(); },100); Audio_.say('鹿豹已啟動，祝你行車平安'); };
+  // 只看地圖也要常亮 —— 使用者要的是「開著這個網頁就不要休眠」，
+  // 不是「只有開了 GPS 才不休眠」
+  el('btnSkip').onclick=()=>{ wakeAcquire(); el('gate').classList.add('hidden');
+    setTimeout(()=>{ if(MAP)MAP.invalidateSize(); },100); };
+
+  // 設定開關
+  const sw=(id,key,after)=>{ const e=el(id); e.checked=!!CFG[key];
+    e.onchange=()=>{ CFG[key]=e.checked; saveCfg(); after&&after(); }; };
+  sw('sVoice','voice'); sw('sBeep','beep'); sw('sVibe','vibe');
+  sw('sDir','dirFilter',()=>state.clear()); sw('sOnlyOver','onlyOver');
+  sw('sWake','wake',()=>{ if(CFG.wake) wakeAcquire(); else wakeRelease(); });
+  sw('sPower','powerSave',()=>{ if(!CFG.powerSave&&POWER.saving) powerExit(); powerReset(); });
+
+  const rng=(rid,vid,key)=>{ const r=el(rid); r.value=CFG[key]; el(vid).textContent=CFG[key];
+    r.oninput=()=>{ CFG[key]=+r.value; el(vid).textContent=r.value; saveCfg(); state.clear(); }; };
+  rng('rT1','vT1','t1'); rng('rT2','vT2','t2'); rng('rT3','vT3','t3'); rng('rSimSpd','vSimSpd','simSpd');
+  rng('rPowerMin','vPowerMin','powerAfterMin');
+
+  el('btnSim').onclick=()=>{ if(SIM) stopSim(); else { Audio_.unlock(); el('gate').classList.add('hidden');
+    document.querySelector('#tabs button[data-v="map"]').click(); startSim(); } };
+
+  el('btnReset').onclick=()=>{ Store.clear(); location.reload(); };
+
+  // 資料
+  // 自建資料源
+  el('feedUrl').value=CFG.feedUrl||'';
+  el('sFeedAuto').checked=!!CFG.feedAuto;
+  el('sFeedAuto').onchange=()=>{ CFG.feedAuto=el('sFeedAuto').checked; saveCfg(); };
+  el('feedUrl').onchange=()=>{ CFG.feedUrl=el('feedUrl').value.trim(); saveCfg(); };
+  el('btnFeedUpdate').onclick=()=>{ CFG.feedUrl=el('feedUrl').value.trim(); saveCfg(); feedUpdate(false); };
+  if(CFG.feedLast) el('feedStat').textContent='上次更新：'+
+    new Date(CFG.feedLast).toLocaleString('zh-TW',{hour12:false})+'，'+CFG.feedCount+' 點';
+
+  el('btnImport').onclick=()=>el('fileIn').click();
+  el('fileIn').onchange=async e=>{
+    const files=Array.from(e.target.files||[]); e.target.value='';
+    for(const f of files){
+      try{
+        const buf=await f.arrayBuffer();
+        if(/\.zip$/i.test(f.name)||isZip(buf)) await ingestZip(buf,f.name);
+        else ingest(decodeBuf(buf),f.name.replace(/\.[^.]+$/,''));
+      }catch(err){ toast('「'+f.name+'」匯入失敗：'+err.message,5000); }
+    }
+  };
+  el('packList').onclick=e=>{
+    if(typeof e.target.closest!=='function') return;
+    const seed=e.target.closest('[data-seedtoggle]');
+    if(seed){
+      CFG.useSeed = CFG.useSeed===false;
+      saveCfg(); rebuildDB();
+      toast(CFG.useSeed?'已開啟內建資料':'已關閉內建資料（國道點位也會一起消失）',3800);
+      return;
+    }
+    const b=e.target.closest('[data-rmpack]'); if(!b)return;
+    PACKS=PACKS.filter(p=>p.id!==b.dataset.rmpack); savePacks(); rebuildDB(); toast('已移除該來源'); };
+  el('btnClearImported').onclick=()=>{ PACKS=[]; savePacks(); Store.del(K('imported'));
+    rebuildDB(); toast('已還原為內建資料'); };
+  el('btnFetchGov').onclick=()=>doFetch(SOURCES[0].f,SOURCES[0].n);
+  el('srcList').onclick=e=>{ const b=e.target.closest('[data-fetch]'); if(!b)return;
+    const s=SOURCES[+b.dataset.fetch]; doFetch(s.f,s.n); };
+
+  // TDX
+  el('tdxId').value=CFG.tdxId; el('tdxSecret').value=CFG.tdxSecret; el('tdxPath').value=CFG.tdxPath;
+  el('btnSaveTdx').onclick=()=>{ CFG.tdxId=el('tdxId').value.trim(); CFG.tdxSecret=el('tdxSecret').value.trim();
+    CFG.tdxPath=el('tdxPath').value.trim()||DEF.tdxPath; saveCfg(); tdxToken=null; fetchTraffic(); };
+  el('btnRefreshTraffic').onclick=()=>{ if(CFG.tdxId) fetchTraffic(); else { renderTraffic(); toast('尚未設定 TDX 金鑰，僅顯示手動播報與回報'); } };
+
+  // 播報
+  el('bcKind').onclick=e=>{ const b=e.target.closest('[data-bc]'); if(!b)return; bcKindSel=b.dataset.bc; renderBcKinds(); };
+  el('trafficFilter').onclick=e=>{ const b=e.target.closest('[data-tf]'); if(!b)return;
+    trafficFilter=b.dataset.tf; renderTrafficFilter(); renderTraffic(); };
+  el('btnAddBroadcast').onclick=()=>{
+    const t=el('bcInput').value.trim(); if(!t){ toast('請先輸入內容'); return; }
+    BROADCASTS.unshift({text:t,kind:bcKindSel,t:Date.now()}); Store.set(K('bc'),BROADCASTS);
+    el('bcInput').value=''; renderTraffic(); toast('已加入播報');
+  };
+
+  // ── 路網 ──
+  el('roadUrl').value=CFG.roadUrl||'';
+  el('btnRoadLoad').onclick=roadLoadUrl;
+  el('btnRoadFile').onclick=()=>el('roadIn').click();
+  el('roadIn').onchange=async e=>{
+    const f=e.target.files[0]; e.target.value=''; if(!f) return;
+    try{ applyRoadNet(JSON.parse(decodeBuf(await f.arrayBuffer())),f.name); }
+    catch(err){ roadStatus('❌ '+err.message); }
+  };
+  el('btnRoadClear').onclick=()=>{
+    ROADNET.roads=[]; ROADNET.grid=null; ROADNET.loaded=false;
+    Store.del(K('roadnet')); CFG.roadCount=0; saveCfg();
+    roadStatus('已清除，前方清單回到航向錐形判斷'); renderTrip();
+  };
+
+  // ── 旅程 ──
+  el('btnTripReset').onclick=()=>{
+    if(SECTION) SECTION=null;
+    TRIP=newTrip(); nearCam.clear(); saveTrip(); renderTrip(); paintSecRow();
+    toast('已開始新的一趟');
+  };
+  el('btnSecAbort').onclick=()=>{ if(SECTION){ SECTION=null; paintSecRow(); renderTrip();
+    toast('已取消這次區間計算'); } };
+
+  // ── 一鍵通報 ──
+  el('fabCam').onclick=()=>quickCam();
+  el('fabQuick').onclick=()=>quickReport('掉落物');
+  el('fabCrash').onclick=()=>quickReport('事故');
+  el('fabMore').onclick=e=>{ e.stopPropagation();
+    fabMenuOpen()? closeFabMenu() : openFabMenu(); };
+  el('fabMenu').onclick=e=>{
+    e.stopPropagation();
+    const b=e.target.closest('[data-fq]');
+    if(!b){ armFabMenu(); return; }        // 點在空白處：不關，但把倒數重新計時
+    closeFabMenu(); quickReport(b.dataset.fq);
+  };
+  // 手指碰到選單就重新計時，免得正在猶豫時被收掉
+  el('fabMenu').addEventListener('pointerdown',armFabMenu);
+  // 點畫面其他地方就收起來
+  document.addEventListener('pointerdown',e=>{
+    if(!fabMenuOpen()) return;
+    // e.target 不一定是 Element（可能是 document 或文字節點），沒有 closest 可用
+    const t=e.target;
+    if(t&&typeof t.closest==='function'&&(t.closest('#fabMenu')||t.closest('#fabMore'))) return;
+    closeFabMenu();
+  },true);
+
+  // ── 樁號盤 ──
+  el('kmBox').onclick=e=>{
+    const adj=e.target.closest('[data-kmadj]');
+    if(adj){ const est=kmEstimate(GPS.last);
+      if(est.conf==='none'){ toast('尚未取得可用的里程推估'); return; }
+      kmLock(est.km+parseFloat(adj.dataset.kmadj),est.road,GPS.last,est.dir);
+      renderKm(); return; }
+    const chip=e.target.closest('[data-km]');
+    if(chip){ const k=parseFloat(chip.dataset.km);
+      const est=kmEstimate(GPS.last);
+      hazTargetKm= (hazTargetKm!=null&&Math.abs(hazTargetKm-k)<0.05)? null : k;
+      hazTargetPos= hazTargetKm==null? null : kmToLatLon(k,est,GPS.last);
+      if(hazTargetKm!=null){ hazRoadSel= est.road&&/^國/.test(est.road)?'國道':hazRoadSel; }
+      renderKm(); renderHazKinds(); Audio_.beep(760,.07); return; }
+  };
+  el('btnKmLock').onclick=e=>{ e.stopPropagation();
+    const est=kmEstimate(GPS.last);
+    if(!GPS.last){ toast('尚未取得 GPS 位置'); return; }
+    const cur=est.conf!=='none'? est.km : 0;
+    const v=prompt('請輸入你現在經過的里程牌數字（公里）','' + (Math.round(cur*10)/10));
+    if(v==null) return;
+    const n=parseFloat(v);
+    if(!isFinite(n)||n<0||n>500){ toast('請輸入 0~500 之間的數字'); return; }
+    kmLock(n,est.road||'',GPS.last,est.dir);
+    renderKm(); toast('已校正為 '+n.toFixed(1)+'K，之後會跟著車自動推進');
+  };
+
+  // ── 照片 EXIF ──
+  el('btnPhoto').onclick=()=>el('photoIn').click();
+  el('photoIn').onchange=async e=>{
+    const f=e.target.files[0]; e.target.value=''; if(!f) return;
+    el('photoStat').textContent='讀取中…';
+    try{
+      const g=exifGPS(await f.arrayBuffer());
+      if(g.lat<21.5||g.lat>26.5||g.lon<118||g.lon>122.5) throw new Error('座標不在台灣範圍內');
+      hazTargetPos=[g.lat,g.lon]; hazTargetKm=null;
+      el('photoStat').textContent='✅ 已取得拍攝位置 '+g.lat.toFixed(5)+', '+g.lon.toFixed(5)+
+        (g.ts?'（'+g.ts+'）':'')+'　照片未保存。';
+      renderHazKinds();
+      if(MAP) MAP.setView([g.lat,g.lon],16);
+      toast('已用照片定位，確認類型後送出');
+    }catch(err){
+      el('photoStat').textContent='❌ '+err.message+
+        '（多數手機需在相機設定開啟「位置」才會寫入座標；LINE 或社群 App 轉傳過的照片會被移除 EXIF）';
+    }
+  };
+
+  // ── 回報內容 ──
+  el('hazKind').onclick=e=>{ const b=e.target.closest('[data-hk]'); if(!b)return;
+    hazKindSel=b.dataset.hk; renderHazKinds(); };
+  el('hazRoadClass').onclick=e=>{ const b=e.target.closest('[data-hrc]'); if(!b)return;
+    hazRoadSel=b.dataset.hrc; renderHazKinds(); };
+  el('hazLane').onclick=e=>{ const b=e.target.closest('[data-hl]'); if(!b)return;
+    hazLaneSel=b.dataset.hl; renderHazKinds(); };
+  el('btnHazSubmit').onclick=()=>{
+    const pos=GPS.last;
+    const at=hazTargetPos||(pos?[pos.lat,pos.lon]:null);
+    if(!at){ toast('尚未取得位置，請先開啟 GPS 或用照片/樁號指定'); return; }
+    const est=kmEstimate(pos);
+    addHazard({type:hazKindSel,lat:at[0],lon:at[1],roadClass:hazRoadSel,lane:hazLaneSel,
+      note:el('hazNote').value.trim(),
+      brg:(pos&&pos.heading!=null&&!isNaN(pos.heading))?pos.heading:null,
+      road:est.road||'',dir:est.dir||'',
+      km:hazTargetKm!=null?hazTargetKm:(est.conf!=='none'?Math.round(est.km*10)/10:null)});
+    el('hazNote').value=''; hazTargetKm=null; hazTargetPos=null;
+    el('photoStat').textContent='';
+    renderKm(); renderHazKinds();
+    toast('已回報「'+hazKindSel+'」');
+  };
+  el('hazList').onclick=e=>{
+    const ok=e.target.closest('[data-hazok]');
+    if(ok){ const h=HAZARDS.find(x=>x.id===ok.dataset.hazok); if(h) voteHazard(h,'confirm'); return; }
+    const cl=e.target.closest('[data-hazclear]');
+    if(cl){ const h=HAZARDS.find(x=>x.id===cl.dataset.hazclear); if(h) voteHazard(h,'clear'); return; }
+    const rt=e.target.closest('[data-hazretract]');
+    if(rt){ const h=HAZARDS.find(x=>x.id===rt.dataset.hazretract); if(h) retractHazard(h); return; }
+    const del=e.target.closest('[data-hazdel]');
+    if(del){ removeHazard(del.dataset.hazdel); toast('已移除'); return; }
+  };
+
+  // ── 共享後端 ──
+  el('hazUrl').value=CFG.hazUrl||'';
+  el('sHazAuto').checked=!!CFG.hazAuto;
+  el('hazUrl').onchange=()=>{ CFG.hazUrl=el('hazUrl').value.trim(); saveCfg(); };
+  el('sHazAuto').onchange=()=>{ CFG.hazAuto=el('sHazAuto').checked; saveCfg(); };
+  el('sProbe').checked=!!CFG.probeSend;
+  el('sProbe').onchange=()=>{ CFG.probeSend=el('sProbe').checked; saveCfg(); };
+  el('btnHazPull').onclick=async()=>{
+    CFG.hazUrl=el('hazUrl').value.trim(); saveCfg();
+    if(!CFG.hazUrl){ toast('請先填入後端網址'); return; }
+    if(!GPS.last){ toast('尚未取得 GPS 位置'); return; }
+    el('hazSyncStat').textContent='連線中…';
+    const n=await pullHazards(GPS.last,false);
+    el('hazSyncStat').textContent= n>=0? '✅ '+new Date().toLocaleTimeString('zh-TW',{hour12:false})+
+      ' 取得 '+n+' 筆' : '❌ 連線失敗，請確認網址與 Worker 是否已部署';
+  };
+
+  // 回報（測速點）
+  el('repKind').onclick=e=>{ const b=e.target.closest('[data-rk]'); if(!b)return; repKindSel=b.dataset.rk; renderRepKinds(); };
+  el('btnReport').onclick=()=>{ if(!GPS.last){ toast('尚未取得 GPS 位置'); return; }
+    addReportAt(GPS.last.lat,GPS.last.lon); toast('已在目前位置新增「'+repKindSel+'」'); };
+  el('btnPickOnMap').onclick=()=>{ if(!MAP){ toast('地圖不可用'); return; }
+    pickMode=true; document.querySelector('#tabs button[data-v="map"]').click();
+    toast('請在地圖上長按（或右鍵）選取位置',4000); };
+  el('repList').onclick=e=>{ const b=e.target.closest('[data-del]'); if(!b)return;
+    REPORTS=REPORTS.filter(r=>r.id!==b.dataset.del); Store.set(K('reports'),REPORTS);
+    rebuildDB(); renderReports(); renderTraffic(); };
+  el('btnExportRep').onclick=()=>{
+    const gj={type:'FeatureCollection',features:REPORTS.map(r=>({type:'Feature',
+      geometry:{type:'Point',coordinates:[r.lon,r.lat]},
+      properties:{kind:r.kind,limit:r.lim,note:r.note,time:new Date(r.t).toISOString()}}))};
+    const blob=new Blob([JSON.stringify(gj,null,2)],{type:'application/geo+json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='luleopard-reports.geojson'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+  };
+}
+/* 從自建資料源（build_speedcams.py 的輸出）更新 */
+const FEED_PACK='全台合併資料源';
+async function feedUpdate(silent){
+  const url=(CFG.feedUrl||'').trim();
+  if(!url){ if(!silent) toast('請先填入資料源網址'); return false; }
+  const say=m=>{ el('feedStat').textContent=m; };
+  say('更新中…');
+  try{
+    const r=await fetch(url,{cache:'no-cache'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const buf=await r.arrayBuffer();
+    let n;
+    if(isZip(buf)){
+      n=await ingestZip(buf,FEED_PACK);
+    }else{
+      const cams=textToCams(decodeBuf(buf)).filter(c=>isFinite(c[0])&&isFinite(c[1]));
+      if(!cams.length) throw new Error('資料源沒有有效點位');
+      addPack(FEED_PACK,cams); n=cams.length;
+    }
+    CFG.feedLast=Date.now(); CFG.feedCount=n; saveCfg();
+    say('✅ '+new Date().toLocaleString('zh-TW',{hour12:false})+' 更新，'+n+' 點');
+    return true;
+  }catch(e){
+    say('❌ '+e.message+(CFG.feedCount?'（仍在使用上次成功抓到的 '+CFG.feedCount+' 點）':''));
+    if(!silent) toast('資料源更新失敗：'+e.message,5000);
+    return false;
+  }
+}
+
+async function doFetch(url,label){
+  if(!url){ toast('此來源需手動下載後匯入'); return; }
+  toast('抓取中…');
+  try{
+    const r=await fetch(url); if(!r.ok) throw new Error('HTTP '+r.status);
+    const buf=await r.arrayBuffer();
+    if(isZip(buf)) await ingestZip(buf,label); else ingest(decodeBuf(buf),label);
+  }catch(e){
+    toast('線上抓取失敗（多半是 CORS）：請按「下載檔案」存到手機，再用「匯入檔案」丟進來',6500);
+  }
+}
+
+/* ---------- 20. 啟動 ---------- */
+function boot(){
+  initMap(); bind();
+  renderSources(); renderBcKinds(); renderRepKinds(); renderTrafficFilter();
+  rebuildDB(); renderReports(); renderTraffic(); paintAlert(null);
+  HAZARDS=HAZARDS.filter(h=>h.expires>Date.now());
+  buildKmAnchors(); renderHazKinds(); renderHazards(); renderKm(); drawHazLayer();
+  try{ const rn=Store.get(K('roadnet'),null); if(rn&&rn.length) loadRoadNet(rn); }catch(e){}
+  roadStatus('');
+  // 隔了很久才回來就當作新的一趟
+  if(Date.now()-(TRIP.lastT||TRIP.startT)>3*3600e3) TRIP=newTrip();
+  renderTrip();
+  setInterval(()=>{ if(el('v-trip').classList.contains('active')) renderTrip(); },1000);
+  // 版本字串一律由 APP_VER / APP_STAGE 帶入，不要在 HTML 裡寫死兩份
+  const gv=el('gateVer'); if(gv) gv.textContent=APP_BUILD;
+  const gb=el('gateBadge'); if(gb) gb.textContent=APP_STAGE;
+  const hb=el('hudBadge'); if(hb){ hb.textContent=APP_STAGE.replace('版',''); hb.title=APP_STAGE+' 建置 '+APP_BUILD; }
+  // 狀態列只放「月日.時分」，開車時夠用又不佔空間；完整序號在關於頁
+  const hbd=el('hudBuild');
+  if(hbd){ hbd.textContent=APP_BUILD.slice(4); hbd.title='建置序號 '+APP_BUILD; }
+  const sv=el('setVer'); if(sv) sv.textContent=APP_STAGE+' · 建置 '+APP_BUILD;
+  // 開啟網頁當下就先試一次。部分瀏覽器不需要使用者手勢就會給；
+  // 需要手勢的那些會失敗，但按下起始按鈕時會再試一次，所以不影響。
+  wakeAcquire();
+  el('dVoice').className='dot '+(('speechSynthesis' in window)?'':'err');
+  if(!Store.persistent) toast('此環境無法保存資料，設定與回報僅在本次開啟期間有效',5000);
+  // PWA manifest（動態注入，維持單檔）。
+  // 部署到 GitHub Pages 時 build-pages.mjs 會放一份真的 manifest.webmanifest
+  // 並在 <head> 加好 link，那種情況就不要再注入第二份（瀏覽器只認第一個，
+  // 兩份併存只會讓人以為圖示壞掉卻查不出原因）。
+  try{
+    if(document.querySelector('link[rel="manifest"]')) throw 0;
+    const mf={name:'鹿豹 · 測速預報',short_name:'鹿豹',start_url:'.',display:'standalone',
+      background_color:'#0b0f14',theme_color:'#0b0f14',
+      icons:[{src:'data:image/svg+xml,'+encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" fill="#0b0f14"/><text x="96" y="126" font-size="96" text-anchor="middle" fill="#c9a227" font-family="sans-serif">鹿</text></svg>'),
+        sizes:'192x192',type:'image/svg+xml'}]};
+    const l=document.createElement('link'); l.rel='manifest';
+    l.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/manifest+json'}));
+    document.head.appendChild(l);
+  }catch(e){}
+  // 每天最多自動更新一次資料源；失敗完全不影響離線使用
+  if(CFG.feedAuto&&CFG.feedUrl&&Date.now()-(CFG.feedLast||0)>864e5) setTimeout(()=>feedUpdate(true),1500);
+  // 對外測試介面
+  window.LP={evaluate,dist,bearing,dirHeadings,dirMatch,onPos,CAMS:()=>CAMS,CFG,tierDist,feedUpdate,
+             parseKmName,buildKmAnchors,kmEstimate,kmLock,kmToLatLon,kmChoices,KM,
+             Native,startGPS,GPS,POWER,powerTick,powerEnter,powerExit,powerReset,
+             WAKE,wakeAcquire,wakeRelease,paintWake,
+             GPSQ,gpsSample,gpsGrade,gpsResetQuality,deriveSpeed,sweptDist,paintGpsWarn,
+             ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
+             cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
+             // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
+             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();},updateTrip,
+             upcomingCams,renderTrip,fmtKm,fmtDur,
+             openFabMenu,closeFabMenu,armFabMenu,fabMenuOpen,FAB_MENU_MS,
+             hazScore,scoreLabel,SCORE_SPEAK,SCORE_SHOW,HALF_LIFE,
+             hazTiers,roadSpeak,evaluateHazards,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
+             REPORTS:()=>REPORTS,setReports:a=>{REPORTS=a;Store.set(K('reports'),REPORTS);rebuildDB();},
+             HAZARDS:()=>HAZARDS,setHazards:a=>{HAZARDS=a;},hazState,pullHazards,voteHazard,isFastRoad,
+             retractHazard,probeTick,sendProbe,cruiseSpeed,cruiseSample,PROBE,
+             renderHazards,saveHazards,scoreBadge,
+             countyOf,coverage,renderCoverage,COUNTIES,
+             ingest,ingestZip,isZip,addPack,textToCams,parseCSV,rowsToCams,
+             PACKS:()=>PACKS,clearPacks:()=>{PACKS=[];savePacks();rebuildDB();},
+             APP_VER,APP_STAGE,APP_BUILD,
+             startSim,stopSim,state};
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
+})();
+</script>
+</body>
+</html>

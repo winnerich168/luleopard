@@ -1,0 +1,31 @@
+{
+  "name": "luleopard-mobile",
+  "version": "1.1.0",
+  "private": true,
+  "description": "鹿豹 · 台灣道路測速預報 — Capacitor 打包（含背景定位）",
+  "scripts": {
+    "prepare:www": "node scripts/build-www.mjs",
+    "patch:android": "node scripts/patch-android.mjs",
+    "icons": "node scripts/make-resources.mjs && npx @capacitor/assets generate --android --iconBackgroundColor '#0b0f14' --splashBackgroundColor '#0b0f14'",
+    "sync": "npm run prepare:www && npx cap sync && npm run patch:android",
+    "android": "npm run sync && npx cap open android",
+    "ios": "npm run prepare:www && npx cap sync && npx cap open ios",
+    "run:android": "npm run sync && npx cap run android",
+    "add:android": "npm run prepare:www && npx cap add android && npm run icons && npm run sync",
+    "add:ios": "npm run prepare:www && npx cap add ios && npx cap sync",
+    "build:apk": "npm run sync && cd android && ./gradlew assembleDebug",
+    "build:release": "npm run sync && cd android && ./gradlew assembleRelease bundleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/ios": "^6.2.0",
+    "@capacitor-community/background-geolocation": "^1.2.24",
+    "@capacitor-community/text-to-speech": "^5.0.0",
+    "@capacitor/keep-awake": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.0"
+  }
+}

@@ -1,0 +1,85 @@
+name: 發佈網頁版到 GitHub Pages
+
+# 這是唯一負責「把網站推上線」的流程。
+# 資料更新（update-speedcams.yml）跑完之後會自動觸發這裡，不用手動按。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "luleopard.html"
+      - "assets/**"
+      - "scripts/build-pages.mjs"
+      - ".github/workflows/pages.yml"
+  # 資料更新流程跑完 → 自動重新發佈（才會帶上新的 docs/data）
+  workflow_run:
+    workflows: ["更新測速點位資料"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一時間只跑一個部署，但排隊不取消 —— 取消掉的那次可能正好是資料更新。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # workflow_run 不論成功失敗都會觸發。資料更新失敗時不該把壞掉的東西推上線 ——
+    # 舊資料總比沒資料好。
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run 觸發時預設會抓到舊的 commit，要明確指定分支才拿得到
+          # 資料更新流程剛剛 push 上去的 docs/data
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 產生 docs/（index.html、manifest、sw.js、圖示）
+        run: node scripts/build-pages.mjs
+
+      - name: 確認產出完整
+        run: |
+          set -e
+          for f in docs/index.html docs/manifest.webmanifest docs/sw.js docs/.nojekyll; do
+            [ -s "$f" ] || { echo "✗ 缺少或空白：$f"; exit 1; }
+          done
+          # index.html 應該要有 315 個內建點位的種子資料，太小代表複製出錯
+          SIZE=$(wc -c < docs/index.html)
+          [ "$SIZE" -gt 100000 ] || { echo "✗ index.html 只有 $SIZE bytes，明顯不對"; exit 1; }
+          echo "✓ index.html $SIZE bytes"
+          if [ -f docs/data/speedcams.min.json ]; then
+            echo "✓ 帶有資料源 $(wc -c < docs/data/speedcams.min.json) bytes"
+          else
+            echo "ℹ 這次沒有 docs/data/（App 仍可用內建 315 點）"
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: 印出網址
+        run: |
+          echo "### 🦌 網頁版已上線" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "資料源網址（填進 App 的「資料 → 我的資料源」）：" >> $GITHUB_STEP_SUMMARY
+          echo '`${{ steps.deployment.outputs.page_url }}data/speedcams.min.json`' >> $GITHUB_STEP_SUMMARY

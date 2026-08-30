@@ -1,0 +1,12 @@
+node_modules/
+mobile/node_modules/
+mobile/www/
+mobile/android/
+mobile/ios/
+mobile/resources/
+etl/dist/
+etl/__pycache__/
+__pycache__/
+*.keystore
+*.jks
+.DS_Store

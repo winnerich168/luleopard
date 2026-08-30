@@ -1,0 +1,77 @@
+鹿豹 · 台灣道路測速預報（LuLeopard）
+著作權所有 © 2026 winnerich168。保留所有權利。
+Copyright © 2026 winnerich168. All rights reserved.
+
+================================================================
+中文
+================================================================
+
+本專案的原始碼公開於 GitHub，是為了讓 GitHub Pages 免費方案能夠發佈網站，
+以及讓使用者能夠檢視這個工具實際做了什麼 —— 一個會持續讀取你的位置的
+行車警示程式，本來就應該可以被檢查。
+
+**公開不等於授權。** 除下列明確允許者外，未經著作權人事前書面同意，
+不得重製、修改、散布、公開傳輸、出租、出借、或以本專案製作衍生著作，
+亦不得將本專案之全部或一部用於任何商業或非商業產品或服務。
+
+明確允許的行為：
+
+1. 於 GitHub 平臺上瀏覽本專案原始碼，以及使用 GitHub 提供的 fork 功能
+   （此為 GitHub 服務條款所賦予之權利）。
+2. 以個人、非商業之目的，於自己的裝置上執行本專案所發佈的網頁版或應用程式。
+3. 為向著作權人回報問題或提出建議，而引用必要範圍內的程式碼片段。
+
+上述限制**僅適用於本專案自行撰寫的程式碼**。本專案使用的第三方程式庫、
+政府開放資料與 OpenStreetMap 資料，各自適用其原本的授權條款，
+不受本條款限制，詳見 NOTICE.md。
+
+免責聲明：本軟體按「現狀」提供，不附任何明示或默示之擔保，包含但不限於
+適售性、特定目的適用性與非侵權之擔保。著作權人對於因使用或無法使用本軟體
+所生之任何損害，不負任何責任。
+
+**本工具僅供行車安全提醒，請以現場標誌與實際路況為準。**
+**行進中請勿操作手機。使用者應自行遵守道路交通法規。**
+
+================================================================
+English
+================================================================
+
+The source code of this project is published on GitHub so that the free
+tier of GitHub Pages can serve the site, and so that users can inspect what
+this tool actually does — a driving-alert program that continuously reads
+your location ought to be inspectable.
+
+**Public visibility does not grant a licence.** Except as expressly permitted
+below, no part of this project may be reproduced, modified, distributed,
+publicly transmitted, rented, lent, or used to create derivative works, nor
+used in whole or in part in any commercial or non-commercial product or
+service, without the prior written consent of the copyright holder.
+
+Expressly permitted:
+
+1. Viewing the source on GitHub and using GitHub's fork feature (rights
+   granted by the GitHub Terms of Service).
+2. Running the published web or application build on your own device for
+   personal, non-commercial purposes.
+3. Quoting code excerpts as strictly necessary to report an issue or make a
+   suggestion to the copyright holder.
+
+These restrictions apply **only to the code written for this project**.
+Third-party libraries, Taiwanese government open data, and OpenStreetMap data
+used by this project remain under their own licences and are not restricted
+by this notice. See NOTICE.md.
+
+DISCLAIMER: THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM THE USE OF OR INABILITY TO USE THE SOFTWARE.
+
+**This tool provides driving-safety reminders only. Always follow the road
+signs and actual conditions. Do not operate a phone while driving.**
+
+================================================================
+
+若你想在自己的專案中使用本專案的程式碼，或有商業合作需求，
+請透過 GitHub 開一個 Issue 聯繫：
+https://github.com/winnerich168/luleopard/issues

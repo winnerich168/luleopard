@@ -1,0 +1,35 @@
+{
+  "name": "luleopard",
+  "version": "1.5.0",
+  "private": true,
+  "description": "鹿豹 · 台灣道路測速照相與區間測速預報，結合 GPS、掉落物與路況回報。單一 HTML 檔，可加到手機主畫面使用。",
+  "keywords": [
+    "taiwan",
+    "speed-camera",
+    "speed-trap",
+    "average-speed-enforcement",
+    "driving-safety",
+    "pwa",
+    "open-data",
+    "測速照相",
+    "區間測速",
+    "行車安全"
+  ],
+  "author": "winnerich168",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://winnerich168.github.io/luleopard/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/winnerich168/luleopard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/winnerich168/luleopard/issues"
+  },
+  "scripts": {
+    "build": "node scripts/build-pages.mjs",
+    "test": "for f in test*.js; do node \"$f\" || exit 1; done && node backend/test_worker.mjs"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2"
+  }
+}

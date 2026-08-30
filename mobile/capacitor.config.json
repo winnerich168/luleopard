@@ -1,0 +1,19 @@
+{
+  "appId": "tw.luleopard.app",
+  "appName": "鹿豹",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "always"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

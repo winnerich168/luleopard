@@ -1,0 +1,36 @@
+{
+  "name": "鹿豹 · 台灣道路測速預報",
+  "short_name": "鹿豹",
+  "description": "測速照相與區間測速預報，結合掉落物與路況回報。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "lang": "zh-TW",
+  "categories": [
+    "navigation",
+    "travel"
+  ],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
