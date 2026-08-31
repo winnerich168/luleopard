@@ -62,7 +62,29 @@ button{font-family:inherit;color:inherit;background:none;border:none;cursor:poin
 #views{flex:1;position:relative;overflow:hidden}
 .view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none}
 .view.active{display:block}
+#mapRot{position:absolute;inset:0;overflow:hidden}
+/* 旋轉時四角會露出空白，所以地圖本體要比視窗大（對角線約 1.42 倍，取 1.6 留餘裕） */
+#mapRot.rot #map{width:160%;height:160%;left:-30%;top:-30%;
+  transform-origin:50% 50%;transition:transform .25s linear}
 #map{position:absolute;inset:0}
+.mecone{will-change:transform}
+.mecone svg{display:block;filter:drop-shadow(0 0 4px rgba(0,0,0,.7))}
+#kmPop{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:950;
+  background:#0e1a26f2;border:1px solid #2f6f9f;border-radius:11px;padding:11px 14px;
+  min-width:210px;max-width:min(330px,88vw);color:#dbeeff;font-size:13px;line-height:1.65;
+  box-shadow:0 8px 26px -10px #000;display:none}
+#kmPop.show{display:block}
+#kmPop .r{font-family:"Archivo",sans-serif;font-weight:800;font-size:12px;letter-spacing:1px;
+  color:#7fc2ff;margin-bottom:5px}
+#kmPop .k{display:flex;justify-content:space-between;gap:12px;font-size:15px;
+  font-variant-numeric:tabular-nums;padding:2px 0}
+#kmPop .k b{color:#fff;font-size:17px}
+#kmPop .n{margin-top:6px;padding-top:6px;border-top:1px solid #2a4a63;font-size:11px;color:#8fb0c8}
+#kmPop .bar{height:2px;background:#2f6f9f;border-radius:2px;margin-top:8px;
+  transform-origin:left center;animation:kmbar linear forwards}
+@keyframes kmbar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+#kmPop .x{position:absolute;top:4px;right:8px;color:#6f92ab;cursor:pointer;font-size:16px;
+  line-height:1;padding:2px 4px}
 #radarWrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#0a0e13}
 #radar{max-width:100%;max-height:100%}
 .pad{padding:14px 14px 90px}
@@ -271,7 +293,10 @@ textarea{resize:vertical;min-height:74px}
 
   <!-- 地圖 -->
   <section class="view active" id="v-map">
-    <div id="map"></div>
+    <div id="mapRot"><div id="map"></div></div>
+    <div id="kmPop"><span class="x" id="kmPopX">×</span>
+      <div class="r" id="kmPopRoad"></div><div id="kmPopBody"></div>
+      <div class="n" id="kmPopNote"></div><div class="bar" id="kmPopBar"></div></div>
     <div id="radarWrap" class="hidden"><canvas id="radar" width="600" height="600"></canvas></div>
     <!-- 一鍵通報：最常遇到的就是掉落物，單手可及、有復原時間 -->
     <div id="fabWrap">
@@ -538,6 +563,18 @@ textarea{resize:vertical;min-height:74px}
         <div class="sw"><input type="checkbox" id="sDir" checked><span></span></div></div>
       <div class="row"><div><label>超速才警告</label><div class="hint">開啟後，車速低於速限時只做安靜提示</div></div>
         <div class="sw"><input type="checkbox" id="sOnlyOver"><span></span></div></div>
+      <div class="row"><div><label>車頭向前</label><div class="hint">地圖跟著行進方向轉，車頭永遠朝上；關閉則北方朝上</div></div>
+        <div class="sw"><input type="checkbox" id="sRot" checked><span></span></div></div>
+      <div class="row"><label>點地圖顯示樁號</label>
+        <select id="kmPopSec">
+          <option value="0">關閉</option>
+          <option value="5">5 秒後關閉</option>
+          <option value="10" selected>10 秒後關閉</option>
+          <option value="15">15 秒</option>
+          <option value="20">20 秒</option>
+          <option value="30">30 秒</option>
+          <option value="60">60 秒</option>
+        </select></div>
       <div class="row"><div><label>通過提示</label><div class="hint">開過測速照相後提示「已通過」，讓你知道警示結束了</div></div>
         <div class="sw"><input type="checkbox" id="sPass" checked><span></span></div></div>
       <div class="row"><div><label>螢幕常亮</label><div class="hint" id="wakeHint">開啟網頁後就避免螢幕自動關閉</div></div>
@@ -665,7 +702,7 @@ const APP_BUILD='20260830.1330';
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
            t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:'',feedAuto:false,feedLast:0,feedCount:0,
-           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,icNotice:true,icDist:3000,icUrl:'',
+           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:'',
            powerSave:true,powerAfterMin:5,
            roadUrl:'',roadCount:0,
            tdxId:'',tdxSecret:'',
@@ -1531,6 +1568,15 @@ function initMap(){
       }).addTo(MAP);
     L.control.zoom({position:'bottomleft'}).addTo(MAP);
     camLayer=L.layerGroup().addTo(MAP);
+    MAPROT.on = CFG.mapRotate!==false;
+    // 用原生 click 而不是 MAP.on('click')：容器被 CSS 旋轉後，
+    // Leaflet 自己算出來的經緯度會偏掉（它用外接矩形）。
+    MAP.getContainer().addEventListener('click',ev=>{
+      if(pickMode) return;                       // 地圖選點模式有自己的處理
+      if(!CFG.kmPopSec) return;
+      const ll=screenToLatLng(ev.clientX,ev.clientY);
+      if(ll) showKmPop(ll.lat,ll.lng);
+    });
     MAP.on('contextmenu',e=>{ if(pickMode){ addReportAt(e.latlng.lat,e.latlng.lng); pickMode=false; toast('已於選取位置新增'); } });
     let pressT;
     MAP.on('mousedown touchstart',e=>{ if(!pickMode)return; pressT=setTimeout(()=>{
@@ -1549,18 +1595,111 @@ function drawCamLayer(){
      .addTo(camLayer);
   });
 }
+/* 錐形車頭游標。圓點看不出方向，錐形的尖端就是行進方向，一眼可辨。 */
+const CONE_SVG='<svg width="34" height="34" viewBox="0 0 34 34">'
+  +'<circle cx="17" cy="17" r="15" fill="#2fd07a22"/>'
+  +'<path d="M17 2 L27 27 L17 21.5 L7 27 Z" fill="#2fd07a" stroke="#fff" stroke-width="2"'
+  +' stroke-linejoin="round"/></svg>';
+
+let coneRot=0;                 // 目前圖示的螢幕旋轉角
+function meIcon(){
+  return L.divIcon({className:'mecone',html:CONE_SVG,iconSize:[34,34],iconAnchor:[17,17]});
+}
+function paintCone(heading){
+  if(!meMarker) return;
+  const e=meMarker.getElement&&meMarker.getElement();
+  if(!e) return;
+  const svg=e.querySelector('svg'); if(!svg) return;
+  /* 地圖轉成「車頭向前」時，整張圖已經轉了 -heading，
+     所以圖示只要抵銷回來就會固定朝上；北方朝上時則直接依航向轉。 */
+  const deg = MAPROT.on ? 0 : (heading||0);
+  if(Math.abs(deg-coneRot)>0.5){ coneRot=deg; svg.style.transform='rotate('+deg+'deg)'; }
+}
+
+/* ── 車頭向前：把地圖容器整個轉 -heading ── */
+const MAPROT={on:false,deg:0,last:0};
+function setMapRotation(heading){
+  const wrap=el('mapRot'); if(!wrap) return;
+  if(!MAPROT.on||heading==null||isNaN(heading)){
+    if(MAPROT.deg!==0){ MAPROT.deg=0; el('map').style.transform=''; }
+    if(wrap.classList.contains('rot')){
+      wrap.classList.remove('rot');
+      if(MAP) setTimeout(()=>{ try{ MAP.invalidateSize({animate:false}); }catch(e){} },0);
+    }
+    return;
+  }
+  if(!wrap.classList.contains('rot')){
+    wrap.classList.add('rot');
+    // 容器尺寸從 100% 變成 160%，不讓 Leaflet 重新量的話它會沿用舊尺寸
+    if(MAP) setTimeout(()=>{ try{ MAP.invalidateSize({animate:false}); }catch(e){} },0);
+  }
+  const d=-heading;
+  // 小幅抖動不轉，不然畫面會一直晃
+  if(Math.abs(((d-MAPROT.deg+540)%360)-180)<3) return;
+  MAPROT.deg=d;
+  el('map').style.transform='rotate('+d+'deg)';
+}
+
+/**
+ * 螢幕座標 → 經緯度。
+ * 地圖容器被 CSS 旋轉之後，Leaflet 內建的換算會失準
+ * （它用 getBoundingClientRect，旋轉後拿到的是外接矩形）。
+ * 這裡自己把點反向轉回未旋轉的座標系再交給 Leaflet。
+ */
+function screenToLatLng(clientX,clientY){
+  if(!MAP) return null;
+  const c=MAP.getContainer(), r=c.getBoundingClientRect();
+  /* 旋轉後 getBoundingClientRect() 給的是外接矩形，寬高不等於元素本身，
+     但「中心點」仍然正確（純旋轉不會移動中心）。
+     元素自己的版面尺寸要用 offsetWidth/Height —— MAP.getSize() 是 Leaflet 的
+     快取值，切換旋轉導致容器改變大小時它不會自動更新，用了會整個偏掉。 */
+  const cx=r.left+r.width/2, cy=r.top+r.height/2;
+  const th=-MAPROT.deg*Math.PI/180;
+  const dx=clientX-cx, dy=clientY-cy;
+  const ux=dx*Math.cos(th)-dy*Math.sin(th);
+  const uy=dx*Math.sin(th)+dy*Math.cos(th);
+  return MAP.containerPointToLatLng([c.offsetWidth/2+ux, c.offsetHeight/2+uy]);
+}
+
 function updateMapPos(p){
   if(!MAP) return;
   if(!meMarker){
-    meMarker=L.circleMarker([p.lat,p.lon],{radius:8,color:'#fff',weight:2,fillColor:'#2fd07a',fillOpacity:1}).addTo(MAP);
+    meMarker=L.marker([p.lat,p.lon],{icon:meIcon(),interactive:false,keyboard:false}).addTo(MAP);
     meCircle=L.circle([p.lat,p.lon],{radius:p.acc||20,color:'#2fd07a',weight:1,fillOpacity:.07}).addTo(MAP);
     MAP.setView([p.lat,p.lon],15);
   } else {
     meMarker.setLatLng([p.lat,p.lon]); meCircle.setLatLng([p.lat,p.lon]).setRadius(p.acc||20);
     if(followMe) MAP.panTo([p.lat,p.lon],{animate:true,duration:.4});
   }
+  // 航向不可信時不要亂轉 —— 轉錯方向比不轉更容易讓人迷失
+  const hd=(p.headingOk===false)?null:p.heading;
+  setMapRotation(hd);
+  paintCone(hd);
 }
 let followMe=true;
+
+/* ── 點地圖看樁號 ── */
+let kmPopT=null;
+function showKmPop(lat,lon){
+  const box=el('kmPop'); if(!box) return null;
+  const r=kmAtPoint(lat,lon);
+  el('kmPopRoad').textContent = r? roadSpeak(r.road).replace('線','線 ')+'　樁號' : '這個位置沒有樁號資料';
+  el('kmPopBody').innerHTML = r
+    ? r.items.map(x=>`<div class="k"><span>${x.dir}</span><b>${x.km.toFixed(1)}K</b></div>`).join('')
+    : '<div class="n">樁號是從國道測速點的名稱推算的，只有國道與部分快速道路算得出來。</div>';
+  el('kmPopNote').textContent = r
+    ? (r.weak? '⚠ '+r.acc+'（附近錨點不足或路段彎曲）' : r.acc+'　離最近錨點 '+r.nearM+' 公尺')
+    : '';
+  const secs=Math.max(3,Math.min(60,CFG.kmPopSec||10));
+  const bar=el('kmPopBar');
+  bar.style.animation='none'; void bar.offsetWidth;      // 重新觸發動畫
+  bar.style.animation='kmbar '+secs+'s linear forwards';
+  box.classList.add('show');
+  clearTimeout(kmPopT);
+  kmPopT=setTimeout(()=>box.classList.remove('show'),secs*1000);
+  return r;
+}
+function hideKmPop(){ clearTimeout(kmPopT); const b=el('kmPop'); if(b) b.classList.remove('show'); }
 
 /* ---------- 13. 雷達（Leaflet 不可用時 / 隧道離線時） ---------- */
 function drawRadar(p){
@@ -1829,6 +1968,10 @@ function parseKmName(name){
   let m=s.match(/國道\s*([0-9零一二兩三四五六七八九十]+)\s*號?\s*([甲乙丙丁己]?)線?/)
       ||s.match(/國\s*([0-9]+)\s*(?:號|線)\s*([甲乙丙丁己]?)/);
   if(m){ const n=cnNum(m[1]); if(isFinite(n)) road='國'+n+(m[2]||''); }
+  /* 汐止—五股高架有自己的一套里程樁，編號跟平面段重疊。
+     混在一起的話，錨點會出現「里程只差 1.2 公里、實際距離卻有 18 公里」
+     這種矛盾，樁號推算會整個歪掉。當成另一條路處理。 */
+  if(road&&/汐五|高架/.test(s)) road+='高架';
   // 省道／快速道路：台 或 臺
   if(!road){ m=s.match(/[台臺]\s*([0-9]+)\s*([甲乙丙丁戊己庚]?)\s*線/);
              if(m) road='台'+m[1]+(m[2]||''); }
@@ -1853,6 +1996,122 @@ function buildKmAnchors(){
   }
   KM.anchors=out;
   return out.length;
+}
+
+/**
+ * 任意一點的樁號（點地圖用）。
+ *
+ * kmEstimate() 是給「我現在在哪」用的，依賴行進方向來決定里程遞增或遞減。
+ * 但點地圖沒有方向可言，所以改用兩個錨點決定「里程增加的方向」再投影：
+ *
+ *   A、B 是同一條路上的兩個已知樁號錨點，
+ *   把目標點投影到 A→B 這條軸上，t 是投影比例，
+ *   km = A.km + t × (B.km − A.km)
+ *
+ * 這樣南北向（國1、國3）和東西向（國4、國6、國8、國10）都算得對，
+ * 不用假設「越南邊里程越大」。
+ *
+ * 南下與北上的桿子座標略有差異（實測同一里程差約 100 公尺），
+ * 所以兩個方向各自用自己的錨點算，得到的數字才貼近路邊實際看到的牌子。
+ */
+function kmAtPoint(lat,lon,maxM){
+  if(!KM.anchors.length) return null;
+  const MAXD=maxM||12000;
+  // 先找最近的錨點決定「這是哪條路」
+  let near=null;
+  for(const a of KM.anchors){
+    const d=dist(lat,lon,a.lat,a.lon);
+    if(d>MAXD) continue;
+    if(!near||d<near.d) near={a,d};
+  }
+  if(!near) return null;
+  const road=near.a.road;
+  const onRoad=KM.anchors.filter(a=>a.road===road);
+
+  const proj=(pool)=>{
+    if(pool.length<2) return null;
+    /* A、B 都要挑「離目標點最近」的，不能挑「離 A 最近」的。
+       實測國道錨點常相距 11~23 公里，那種跨度下高速公路是彎的，
+       直線弦長只有實際里程的 70~83% —— 投影出來會差到 3 公里以上。
+       兩個錨點都貼著目標點時，中間那小段幾乎是直的，誤差才收得住。 */
+    const sorted=pool.map(a=>({a,d:dist(lat,lon,a.lat,a.lon)})).sort((x,y)=>x.d-y.d);
+    const A=sorted[0];
+    let B=null;
+    for(let i=1;i<sorted.length;i++){
+      const c=sorted[i];
+      if(Math.abs(c.a.km-A.a.km)<0.3) continue;
+      if(dist(A.a.lat,A.a.lon,c.a.lat,c.a.lon)<50) continue;
+      B={b:c.a,d:c.d}; break;                 // sorted 過了，第一個合格的就是最近的
+    }
+    if(!B) return null;
+    /* 同一套里程系統下，兩點的直線距離應該接近里程差（彎道會短一些，但不會差太多）。
+       比值離譜就代表這兩個錨點根本不在同一條連續路線上（例如高架與平面、
+       或其中一個的座標／樁號有誤），用它們建立的投影軸會完全錯誤。 */
+    {
+      const kx0=111320*Math.cos(rad(lat)), ky0=110540;
+      const cx=(B.b.lon-A.a.lon)*kx0, cy=(B.b.lat-A.a.lat)*ky0;
+      const ratio=Math.hypot(cx,cy)/(Math.abs(B.b.km-A.a.km)*1000);
+      if(!(ratio>=0.7&&ratio<=1.4)) return null;
+    }
+    // 轉成公尺平面（台灣緯度下經度要乘 cos）
+    const kx=111320*Math.cos(rad(lat)), ky=110540;
+    const ax=0, ay=0;
+    const bx=(B.b.lon-A.a.lon)*kx, by=(B.b.lat-A.a.lat)*ky;
+    const px=(lon-A.a.lon)*kx, py=(lat-A.a.lat)*ky;
+    const L2=bx*bx+by*by;
+    if(!L2) return null;
+    const t=(px*bx+py*by)/L2;
+    const km=A.a.km+t*(B.b.km-A.a.km);
+    if(!isFinite(km)||km<0||km>500) return null;
+    /* 物理合理性：沿路距離一定 ≥ 直線距離，而高速公路再彎也很少超過直線的 1.6 倍。
+       所以「算出來的樁號」跟「最近錨點的樁號」差距，不可能遠大於兩點的直線距離。
+       沒有這道檢查時，投影軸偶爾會選到幾乎垂直於道路的一對錨點，t 就爆掉 ——
+       實測出現過離最近錨點才 1 公里、卻算出差 10 公里的結果。 */
+    const maxDrift=A.d/1000*1.6+0.3;
+    if(Math.abs(km-A.a.km)>maxDrift) return null;
+    // 離軸多遠 —— 太遠代表這個點根本不在這條路上
+    const off=Math.hypot(px-t*bx,py-t*by);
+    // 這兩個錨點的跨度。跨度越大，中間的彎道誤差越大，要誠實反映在精度上。
+    const span=Math.abs(B.b.km-A.a.km);
+    // 弦長 / 里程差：明顯小於 1 代表這段路是彎的，投影會低估
+    const chord=Math.hypot(bx,by)/(span*1000);
+    return {km:Math.round(km*10)/10, off:Math.round(off), anchor:A.a, span, chord};
+  };
+
+  const items=[];
+  for(const dir of ['南下','北上']){
+    const pool=onRoad.filter(a=>a.dir===dir);
+    const r=proj(pool);
+    if(r) items.push({dir,km:r.km,off:r.off,span:r.span,chord:r.chord});
+  }
+  /* 刻意不做「用整條路的錨點概估」的退路。
+     混用兩個方向的錨點時，只要其中一支的座標或樁號有問題，就會投影出
+     差 10 公里的答案，而且看起來像正常結果。這個功能存在的意義就是
+     跟路邊的牌子對得上 —— 算不出來就說算不出來，比給錯數字誠實得多。 */
+  /* 最後一道把關：用「真正最近的那個錨點」交叉檢查。
+     沿路距離最多約是直線距離的 1.6 倍，所以離錨點 1 公里的點，
+     樁號不可能跟它差 10 公里。過不了這關的寧可不給答案 ——
+     這個功能是要跟路邊的牌子對照的，給錯數字比不給更糟。 */
+  const limit=near.d/1000*1.6+0.5;
+  const kept=items.filter(x=>Math.abs(x.km-near.a.km)<=limit);
+  if(!kept.length) return null;
+  items.length=0; items.push(...kept);
+  const minOff=Math.min(...items.map(x=>x.off));
+  const maxSpan=Math.max(...items.map(x=>x.span||0));
+  const minChord=Math.min(...items.map(x=>x.chord||1));
+  /* 誠實標示精度。這個功能的價值就在於「跟路邊牌子對得上」，
+     給一個看起來很精確但其實差 3 公里的數字，比不給更糟。 */
+  /* 誤差主要來自「離最近錨點多遠」—— 站在錨點上時，錨點跨度再大也不影響。
+     所以跨度與彎曲只有在真的需要內插（離錨點夠遠）時才算進不確定性。
+     一開始把 span 直接當成 weak 條件，結果連正好點在錨點上、誤差 0 的情況
+     都會跳「概估可能差 1 公里」，反而讓人不信任準的那些。 */
+  const interp = near.d>800;
+  const weak = minOff>400 || near.d>6000 || (interp && (maxSpan>6 || minChord<0.9));
+  const acc = weak ? '概估，可能差 1 公里以上'
+            : near.d<200 ? '±0.1 公里'
+            : near.d<1500 ? '±0.3 公里' : '±0.5 公里';
+  return {road, items, off:minOff, nearM:Math.round(near.d),
+          span:Math.round(maxSpan*10)/10, chord:Math.round(minChord*100)/100, weak, acc};
 }
 
 /** 南下(往南)=里程增加 → +1；北上=遞減 → -1。用航向判斷，沒航向時用文字。 */
@@ -3059,6 +3318,15 @@ function bind(){
   sw('sVoice','voice'); sw('sBeep','beep'); sw('sVibe','vibe');
   sw('sDir','dirFilter',()=>state.clear()); sw('sOnlyOver','onlyOver');
   sw('sPass','passNotice');
+  sw('sRot','mapRotate',()=>{ MAPROT.on=CFG.mapRotate!==false;
+    if(!MAPROT.on) setMapRotation(null);
+    else if(GPS.last) setMapRotation(GPS.last.headingOk===false?null:GPS.last.heading);
+    if(GPS.last) paintCone(GPS.last.headingOk===false?null:GPS.last.heading); });
+  const kps=el('kmPopSec');
+  if(kps){ kps.value=String(CFG.kmPopSec==null?10:CFG.kmPopSec);
+    kps.onchange=()=>{ CFG.kmPopSec=parseInt(kps.value,10)||0; saveCfg();
+      if(!CFG.kmPopSec) hideKmPop(); }; }
+  el('kmPopX').onclick=hideKmPop;
   sw('sWake','wake',()=>{ if(CFG.wake) wakeAcquire(); else wakeRelease(); });
   sw('sPower','powerSave',()=>{ if(!CFG.powerSave&&POWER.saving) powerExit(); powerReset(); });
 
@@ -3420,7 +3688,7 @@ function boot(){
              WAKE,wakeAcquire,wakeRelease,paintWake,
              GPSQ,gpsSample,gpsGrade,gpsResetQuality,deriveSpeed,sweptDist,paintGpsWarn,
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
-             cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
+             kmAtPoint,cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
              TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();IC.said.clear();IC.lastAt=0;},updateTrip,
              upcomingCams,renderTrip,fmtKm,fmtDur,
@@ -3434,6 +3702,8 @@ function boot(){
              retractHazard,probeTick,sendProbe,cruiseSpeed,cruiseSample,PROBE,
              renderHazards,saveHazards,scoreBadge,
              countyOf,coverage,renderCoverage,COUNTIES,
+             MAPROT,setMapRotation,screenToLatLng,showKmPop,hideKmPop,paintCone,updateMapPos,
+             MAP:()=>MAP,
              ingest,ingestZip,isZip,addPack,textToCams,parseCSV,rowsToCams,
              PACKS:()=>PACKS,clearPacks:()=>{PACKS=[];savePacks();rebuildDB();},
              APP_VER,APP_STAGE,APP_BUILD,
