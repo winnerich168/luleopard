@@ -29,6 +29,27 @@ jobs:
 
       # 腳本只用標準函式庫，沒有 pip install 這一步
 
+      # 臺南市的官方資料只有「設置位置」文字、沒有座標，必須先 geocoding。
+      # 結果會 commit 進 etl/downloads/，之後每週就直接沿用，不會重複打 Nominatim。
+      - name: 臺南座標推算（只有第一次需要）
+        continue-on-error: true
+        run: |
+          if [ -f etl/downloads/tainan_geocoded.csv ]; then
+            echo "已有 tainan_geocoded.csv，略過"
+          else
+            python3 - <<'EOF'
+          import urllib.request, os
+          url = "https://data.tainan.gov.tw/File/ResourceCsvDownload/1c7e82f0-d6b2-4b20-aeff-5c768100f82c"
+          os.makedirs("etl/downloads", exist_ok=True)
+          req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+          open("etl/downloads/tainan.csv", "wb").write(urllib.request.urlopen(req, timeout=150).read())
+          print("已下載臺南原始資料")
+          EOF
+            python3 etl/geocode_tainan.py \
+              --in etl/downloads/tainan.csv \
+              --out etl/downloads
+          fi
+
       - name: 抓取並合併各來源
         id: build
         run: |
@@ -82,7 +103,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/data
+          git add docs/data etl/downloads/tainan_geocoded.csv 2>/dev/null || git add docs/data
           if git diff --staged --quiet; then
             echo "資料沒有變化，不 commit"
           else

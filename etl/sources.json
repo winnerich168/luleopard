@@ -152,7 +152,8 @@
       "county": "臺南市",
       "priority": 4,
       "verified": false,
-      "note": "⚠️ 這份沒有經緯度欄位，只有文字地址，腳本會全部丟棄並在報告中列為 no_coords。臺南要有座標必須自行 geocoding，或改用警察局的 PDF 人工整理。"
+      "note": "⚠️ 這份沒有經緯度欄位，只有文字地址，腳本會全部丟棄並在報告中列為 no_coords。臺南要有座標必須自行 geocoding，或改用警察局的 PDF 人工整理。",
+      "timeout": 150
     },
     {
       "id": "tainan_geocoded",
@@ -183,7 +184,8 @@
       "county": "高雄市",
       "priority": 3,
       "verified": false,
-      "note": "欄位「座標緯N度」「座標經E度」。資料停留在 111 年（2022），是六都中最舊的。"
+      "note": "欄位「座標緯N度」「座標經E度」。資料停留在 111 年（2022），是六都中最舊的。",
+      "timeout": 150
     },
     {
       "id": "kaohsiung_109",
@@ -200,7 +202,8 @@
       "county": "高雄市",
       "priority": 5,
       "verified": false,
-      "note": "警政署標準 schema，當作 111 年那份的補充（去重後只會補上 111 年沒有的點）。"
+      "note": "警政署標準 schema，當作 111 年那份的補充（去重後只會補上 111 年沒有的點）。",
+      "timeout": 150
     },
     {
       "id": "penghu",

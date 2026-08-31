@@ -21,7 +21,7 @@
 
 import argparse, csv, html, io, json, os, re, sys, time, zipfile
 from html.parser import HTMLParser
-import urllib.request, urllib.error
+import urllib.request, urllib.error, urllib.parse
 from collections import defaultdict, OrderedDict
 from datetime import datetime, timezone, timedelta
 
@@ -36,7 +36,29 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # ──────────────────────────────────────────────────────────────
 # 1. 取得原始位元組
 # ──────────────────────────────────────────────────────────────
+def safe_url(u):
+    """
+    把網址裡的非 ASCII 字元做百分比編碼。
+
+    urllib 不會自己處理 —— 網址含中文就直接丟 UnicodeEncodeError。
+    國道那份的檔名正是「1150720-國道公路固定式測速照相地點.zip」，
+    所以整個國道資料源一直抓不到，錯誤訊息還是看不懂的
+    「'ascii' codec can't encode characters」。
+    """
+    try:
+        sp = urllib.parse.urlsplit(u)
+        return urllib.parse.urlunsplit((
+            sp.scheme, sp.netloc,
+            urllib.parse.quote(sp.path, safe="/%~"),
+            urllib.parse.quote(sp.query, safe="=&?/:%+,~"),
+            urllib.parse.quote(sp.fragment, safe="/%~"),
+        ))
+    except Exception:                                   # noqa: BLE001
+        return u
+
+
 def http_get(url, timeout=60, retries=3):
+    url = safe_url(url)
     last = None
     for attempt in range(retries):
         try:
@@ -378,11 +400,17 @@ def payload_to_points(raw, src, bbox, stats, depth=0):
             pass                                            # 掉回 CSV 處理
 
     # HTML 頁面（例如新竹市警察局那張表）
-    if re.search(r"(?is)<table[\s>]", stripped[:200000]) and re.search(r"(?i)<html|<!doctype", stripped[:2000]):
+    looks_html = re.search(r"(?i)<html|<!doctype", stripped[:2000])
+    if looks_html and re.search(r"(?is)<table[\s>]", stripped[:200000]):
         headers, rows = html_to_rows(text)
         if headers and rows:
             stats["from_html"] = len(rows)
             return normalize(headers, rows, src, bbox, stats)
+    if looks_html:
+        # 掉到 CSV 分支的話，表頭會變成「<!DOCTYPE html>」，錯誤訊息完全看不懂。
+        # 網頁改版（改成 JS 動態載入、或網址變成錯誤頁）就是長這樣，直接講清楚。
+        raise ValueError("抓回來的是 HTML 網頁而不是資料檔，且頁面裡沒有可解析的表格 —— "
+                         "來源網址可能已失效或改版，請到來源頁面重新取得下載網址")
 
     headers, rows = rows_from_csv(text)
     if not headers:
@@ -415,7 +443,10 @@ def load_source(src, bbox, offline, downloads, cache_dir, no_fallback=False):
     if offline:
         attempts = files
     elif no_fallback:
-        attempts = urls
+        # no-fallback 的用意是「網路失敗時不要偷偷拿本機舊檔頂替」，
+        # 不是「不准用本機來源」。像 tainan_geocoded 這種本來就沒有網址、
+        # 只由 geocode_tainan.py 在本機產生的來源，仍然要讀得到。
+        attempts = urls if urls else files
     else:
         attempts = urls + files
     stats["fallback_available"] = bool(files) and not offline and not no_fallback
@@ -428,7 +459,8 @@ def load_source(src, bbox, offline, downloads, cache_dir, no_fallback=False):
     errors = []
     for how, loc in attempts:
         try:
-            raw = open(loc, "rb").read() if how == "file" else http_get(loc)
+            raw = (open(loc, "rb").read() if how == "file"
+                   else http_get(loc, timeout=src.get("timeout", 60)))
             if not raw:
                 raise ValueError("空回應")
             pts = payload_to_points(raw, src, bbox, stats)
