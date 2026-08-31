@@ -177,6 +177,11 @@ textarea{resize:vertical;min-height:74px}
 #secRow .ic{font-size:18px;line-height:1}
 #secRow .tx{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 #secRow .dd{font-weight:800;font-variant-numeric:tabular-nums;font-size:17px}
+#icRow{display:none;align-items:center;gap:7px;margin-top:6px;padding:6px 9px;border-radius:8px;
+  background:#10243a;border:1px solid #2a5c8f;font-size:13px;color:#bfe0ff}
+#icRow.show{display:flex}
+#icRow .tx{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#icRow .dd{font-variant-numeric:tabular-nums;font-weight:700;color:#7fc2ff}
 #hazRow{display:none;align-items:center;gap:9px;margin-top:7px;padding:7px 11px;border-radius:10px;
   background:#2a1d10;border:1px solid #7a4a12;font-size:13px}
 #hazRow.show{display:flex}
@@ -251,6 +256,7 @@ textarea{resize:vertical;min-height:74px}
   <div id="hudBar"><div id="hudBarFill"></div></div>
   <div id="secRow"><span class="ic">📏</span><span class="tx" id="secRowTx"></span><span class="dd" id="secRowAvg"></span></div>
   <div id="hazRow"><span class="ic" id="hazIc">⚠️</span><span class="tx" id="hazTx"></span><span class="dd" id="hazDd"></span></div>
+  <div id="icRow"><span class="ic">🛣️</span><span class="tx" id="icTx"></span><span class="dd" id="icDd"></span></div>
   <div id="statusRow">
     <span><i class="dot" id="dGps"></i><span id="lGps">GPS 未啟動</span></span>
     <span><i class="dot" id="dDb"></i><span id="lDb">0 點</span></span>
@@ -479,6 +485,30 @@ textarea{resize:vertical;min-height:74px}
       <button class="btn wide sm danger" id="btnRoadClear">清除路網</button>
       <div class="hint" id="roadMsg" style="margin-top:8px"></div>
     </div>
+    <div class="card">
+      <h3>🛣️ 交流道預報 <small>提前告訴你下一個出口</small></h3>
+      <div class="row"><label>目前狀態</label><b id="icStat">未載入</b></div>
+      <div class="hint" style="margin-bottom:9px">
+        高速行駛（時速 60 以上）時，到達交流道前 <b>3 公里</b>播報一次名稱與出口編號 ——
+        決定要不要下交流道通常只有幾秒鐘，提前知道才來得及變換車道。<br>
+        資料由 <code>etl/build_interchanges.py</code> 從 OpenStreetMap 產生。<b>沒載入不影響其他功能。</b>
+      </div>
+      <div class="row"><div><label>交流道語音預報</label><div class="hint">關閉後只在畫面顯示，不出聲</div></div>
+        <div class="sw"><input type="checkbox" id="sIc" checked><span></span></div></div>
+      <div class="row"><label>提前距離</label>
+        <select id="icDist">
+          <option value="2000">2 公里</option>
+          <option value="3000" selected>3 公里</option>
+          <option value="4000">4 公里</option>
+          <option value="5000">5 公里</option>
+        </select></div>
+      <input type="text" id="icUrl" placeholder="https://你的帳號.github.io/專案/data/interchanges.min.json" autocomplete="off" spellcheck="false">
+      <button class="btn wide primary" id="btnIcLoad">從網址載入交流道</button>
+      <button class="btn wide" id="btnIcFile">改用檔案匯入</button>
+      <input type="file" id="icIn" accept=".json" class="hidden">
+      <button class="btn wide sm danger" id="btnIcClear">清除交流道資料</button>
+      <div class="hint" id="icMsg" style="margin-top:8px"></div>
+    </div>
 
     <div class="card">
       <h3>📦 已載入的來源 <small>可個別移除</small></h3>
@@ -517,6 +547,8 @@ textarea{resize:vertical;min-height:74px}
         <div class="sw"><input type="checkbox" id="sDir" checked><span></span></div></div>
       <div class="row"><div><label>超速才警告</label><div class="hint">開啟後，車速低於速限時只做安靜提示</div></div>
         <div class="sw"><input type="checkbox" id="sOnlyOver"><span></span></div></div>
+      <div class="row"><div><label>通過提示</label><div class="hint">開過測速照相後提示「已通過」，讓你知道警示結束了</div></div>
+        <div class="sw"><input type="checkbox" id="sPass" checked><span></span></div></div>
       <div class="row"><div><label>螢幕常亮</label><div class="hint" id="wakeHint">開啟網頁後就避免螢幕自動關閉</div></div>
         <div class="sw"><input type="checkbox" id="sWake" checked><span></span></div></div>
       <div class="row"><div><label>靜止自動省電</label><div class="hint">停車後降低定位頻率，開始行駛自動恢復</div></div>
@@ -637,12 +669,12 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20260830.2142';
+const APP_BUILD='20260831.2234';
 
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
            t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:'',feedAuto:false,feedLast:0,feedCount:0,
-           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,
+           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,icNotice:true,icDist:3000,icUrl:'',
            powerSave:true,powerAfterMin:5,
            roadUrl:'',roadCount:0,
            tdxId:'',tdxSecret:'',
@@ -878,6 +910,12 @@ const Audio_=(function(){
 /* ---------- 9. 警示引擎 ---------- */
 const REACT=[20,12,6];          // 三級各自的「反應秒數」
 const state=new Map();          // camId -> 已觸發到第幾級
+/* 已經通過的點。實測回報：通過測速照相之後，畫面上的距離不但沒有消失，
+   還會繼續往上加 —— 等於「倒數到 0 之後再倒著數回去」，看起來像有正負號。
+   原本只靠「現在這一格它在不在前方 ±85°」判斷，只要有一格判斷失準
+   （定位跳點、航向暫時不可信、剛好被線段掃描豁免），它就會被重新選上。
+   改成明確記錄「這個點這一趟已經過去了」，之後一律不再選它 —— 結構上就不可能再發生。*/
+const passedCams=new Map();     // camId -> 通過時間
 let lastAlertAt=0;
 
 function tierDist(tier,speedMps){
@@ -944,17 +982,25 @@ function evaluate(pos){
   const hd = pos.headingOk===false ? null : heading;
 
   for(const c of CAMS){
+    // 這一趟已經開過去的，永遠不再選 —— 這是「距離會往上加」的根治方式
+    if(passedCams.has(c.id)){ state.delete(c.id); continue; }
     if(Math.abs(c.lat-lat)>dLat||Math.abs(c.lon-lon)>dLon) { state.delete(c.id); continue; }
     const d0=dist(lat,lon,c.lat,c.lon);
     const d=sweptDist(pos,c,d0);          // 這一步「掃過」的最近距離
     if(d>far){ state.delete(c.id); continue; }
     if(!dirMatch(c,hd)){ state.delete(c.id); continue; }
-    // 必須在前方（有可信航向時），±85° 視為前方。
-    // 但如果這一步是「掃過去」的（d 明顯小於目前距離），代表我們就是從它旁邊
-    // 開過去的，這時不能因為它現在落在後方就靜音 —— 那正是漏報的情形。
-    if(hd!=null&&!isNaN(hd)&&v>1.5&&d0-d<25){
-      const brg=bearing(lat,lon,c.lat,c.lon);
-      if(angDiff(brg,hd)>85){ state.delete(c.id); continue; }
+    // 判斷它現在在前方還是後方（有可信航向且真的在動時才判得準）
+    let behind=false;
+    if(hd!=null&&!isNaN(hd)&&v>1.5){
+      behind = angDiff(bearing(lat,lon,c.lat,c.lon),hd)>85;
+    }
+    if(behind){
+      // 已經警示過的點跑到後方 = 真的通過了 → 提示一次並永久排除
+      if((state.get(c.id)||0)>0) announcePassed(c,pos);
+      // 這一步是「掃過去」的（線段離它很近但現在已經在後方）也算通過
+      else if(d0-d>=25) announcePassed(c,pos);
+      else state.delete(c.id);
+      continue;
     }
     // 距離相同時（例如同一位置同時有點測與區間），優先提示區間測速
     if(!best || d < best.d-1 || (Math.abs(d-best.d)<=1 && c.sec && !best.cam.sec)) best={cam:c,d,d0};
@@ -979,6 +1025,24 @@ function evaluate(pos){
   }
   paintAlert({cam,d:d0,tier,v});
   return best;
+}
+
+/**
+ * 通過測速照相時提示一次。
+ * 開車時「警示結束了」跟「警示開始了」一樣重要 —— 沒有收尾的話，
+ * 駕駛不知道那個一直在畫面上的東西到底過了沒。
+ */
+function announcePassed(cam,pos){
+  if(passedCams.has(cam.id)) return;
+  passedCams.set(cam.id,Date.now());
+  state.delete(cam.id);
+  if(cam.sec) return;                     // 區間測速有自己的結算提示，不重複講
+  if(!CFG.passNotice) return;
+  const kind=cam.sec?'區間測速':'測速照相';
+  Audio_.say(kind+'已通過');
+  Audio_.beep(520,.12,.08);               // 比警示低沉，一聽就知道是「結束」不是「開始」
+  Audio_.vibe(50);
+  el('alertSub').textContent=cam.name+' · 已通過';
 }
 
 function announce(cam,d,tier,over,kmh,speedOk){
@@ -1293,6 +1357,7 @@ function onPos(lat,lon,heading,speed,acc,simulated){
   powerTick(p);
   probeTick(p);
   evaluate(p);
+  icTick(p);
   updateTrip(p);
   paintSecRow();
   paintHazRow(evaluateHazards(p));
@@ -2487,6 +2552,79 @@ function quickCam(kind){
 let camUndoId=null, camUndoTimer=null;
 
 /* ═══════════════════════════════════════════════════════════
+   17g1b. 交流道預報
+
+   高速公路上「下一個交流道是哪裡」是駕駛真正需要的資訊 —— 決定要不要下
+   交流道通常只有幾秒鐘。到達前 3 公里播報一次名稱，剛好夠變換車道。
+
+   資料由 etl/build_interchanges.py 從 OpenStreetMap 的 highway=motorway_junction
+   節點產生（ODbL）。沒載入時整個功能靜默，不影響其他警示。
+   ═══════════════════════════════════════════════════════════ */
+const IC={items:[],loaded:false,said:new Set(),lastAt:0,hideT:null};
+
+function loadInterchanges(arr){
+  if(!Array.isArray(arr)||!arr.length) throw new Error('交流道資料是空的');
+  // [lat, lon, 名稱, 出口編號, 路名]
+  IC.items=arr.filter(x=>Array.isArray(x)&&isFinite(x[0])&&isFinite(x[1])&&x[2]);
+  IC.loaded=IC.items.length>0;
+  IC.said.clear();
+  icStatus('已載入 '+IC.items.length+' 個交流道');
+  try{ Store.set(K('ic'),IC.items); }catch(e){}
+  return IC.items.length;
+}
+function icStatus(m){
+  const e=el('icMsg'); if(e) e.textContent=m||'';
+  const st=el('icStat'); if(st) st.textContent= IC.loaded? IC.items.length+' 個' : '未載入';
+}
+
+/**
+ * 每次定位檢查一次「前方即將到達的交流道」。
+ * 只在高速行駛（> 60 km/h）才啟用 —— 市區慢速經過交流道附近會一直誤報。
+ */
+function icTick(pos){
+  if(!CFG.icNotice||!IC.loaded) return null;
+  const v=(pos.speed||0)*3.6;
+  if(v<60||pos.speedOk===false) return null;
+  const hd=(pos.headingOk===false)?null:pos.heading;
+  if(hd==null||isNaN(hd)) return null;          // 沒有可信航向就判不出前方
+  const now=Date.now();
+  const R=CFG.icDist||3000;
+  const win=R*1.25;
+  const dLat=win/111320*1.2, dLon=win/(111320*Math.max(0.2,Math.cos(rad(pos.lat))))*1.2;
+
+  let best=null;
+  for(const it of IC.items){
+    if(Math.abs(it[0]-pos.lat)>dLat||Math.abs(it[1]-pos.lon)>dLon) continue;
+    const key=it[4]+'|'+it[2];
+    if(IC.said.has(key)) continue;
+    const d=dist(pos.lat,pos.lon,it[0],it[1]);
+    if(d>win) continue;
+    // 前方 ±35°：交流道就在路邊，錐形太寬會把對向或平行道路的也算進來
+    if(angDiff(bearing(pos.lat,pos.lon,it[0],it[1]),hd)>35) continue;
+    if(!best||d<best.d) best={it,d,key};
+  }
+  if(!best||best.d>R) return null;
+  // 跟測速警示錯開，兩個聲音不要疊在一起
+  if(now-lastAlertAt<2500||now-IC.lastAt<8000) return null;
+  IC.said.add(best.key);
+  IC.lastAt=now;
+  const name=best.it[2], ref=best.it[3], road=best.it[4];
+  const km=(best.d/1000).toFixed(1).replace(/\.0$/,'');
+  const txt='前方'+km+'公里，'+(ref?'出口'+ref+'，':'')+name;
+  Audio_.say(txt);
+  Audio_.beep(740,.1,.07);
+  const row=el('icRow');
+  if(row){
+    row.classList.add('show');
+    el('icTx').textContent=name+(ref?' · 出口'+ref:'');
+    el('icDd').textContent=km+' km';
+    clearTimeout(IC.hideT);
+    IC.hideT=setTimeout(()=>row.classList.remove('show'),20000);
+  }
+  return {name,ref,road,d:best.d,txt};
+}
+
+/* ═══════════════════════════════════════════════════════════
    17g2. 路網幾何
    有了道路中心線，就能把「前方」從航向錐形改成沿著路彎過去，
    里程也能用沿路距離而不是直線 —— 山區彎道差很多。
@@ -2929,6 +3067,7 @@ function bind(){
     e.onchange=()=>{ CFG[key]=e.checked; saveCfg(); after&&after(); }; };
   sw('sVoice','voice'); sw('sBeep','beep'); sw('sVibe','vibe');
   sw('sDir','dirFilter',()=>state.clear()); sw('sOnlyOver','onlyOver');
+  sw('sPass','passNotice');
   sw('sWake','wake',()=>{ if(CFG.wake) wakeAcquire(); else wakeRelease(); });
   sw('sPower','powerSave',()=>{ if(!CFG.powerSave&&POWER.saving) powerExit(); powerReset(); });
 
@@ -3009,6 +3148,45 @@ function bind(){
     ROADNET.roads=[]; ROADNET.grid=null; ROADNET.loaded=false;
     Store.del(K('roadnet')); CFG.roadCount=0; saveCfg();
     roadStatus('已清除，前方清單回到航向錐形判斷'); renderTrip();
+  };
+
+  // ── 交流道 ──
+  sw('sIc','icNotice');
+  const icEl=el('icDist');
+  if(icEl){ icEl.value=String(CFG.icDist||3000);
+    icEl.onchange=()=>{ CFG.icDist=parseInt(icEl.value,10)||3000; saveCfg();
+      icStatus('提前距離改為 '+(CFG.icDist/1000)+' 公里'); }; }
+  const icU=el('icUrl'); if(icU) icU.value=CFG.icUrl||'';
+  // 交流道資料可能是 {items:[...]} 或直接就是陣列，兩種都吃
+  const icRows=j=>Array.isArray(j)?j:(j&&Array.isArray(j.items)?j.items:null);
+  const applyIc=(j,label)=>{
+    const rows=icRows(j);
+    if(!rows) throw new Error('格式不對：找不到 items 陣列');
+    const n=loadInterchanges(rows);
+    CFG.icUrl=icU?icU.value.trim():''; saveCfg();
+    icStatus('✅ 已載入 '+n+' 個交流道'+(label?'（'+label+'）':''));
+  };
+  el('btnIcLoad').onclick=async()=>{
+    const u=(icU.value||'').trim();
+    if(!u){ icStatus('請先填入網址'); return; }
+    icStatus('載入中…');
+    try{
+      const r=await fetch(u,{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      applyIc(await r.json(),'');
+    }catch(e){ icStatus('❌ '+e.message+'（政府/GitHub 以外的網址常被 CORS 擋，可改用檔案匯入）'); }
+  };
+  el('btnIcFile').onclick=()=>el('icIn').click();
+  el('icIn').onchange=async e=>{
+    const f=e.target.files[0]; e.target.value=''; if(!f) return;
+    try{ applyIc(JSON.parse(decodeBuf(await f.arrayBuffer())),f.name); }
+    catch(err){ icStatus('❌ '+err.message); }
+  };
+  el('btnIcClear').onclick=()=>{
+    IC.items=[]; IC.loaded=false; IC.said.clear();
+    Store.del(K('ic')); CFG.icUrl=''; saveCfg();
+    if(icU) icU.value='';
+    icStatus('已清除交流道資料');
   };
 
   // ── 旅程 ──
@@ -3208,6 +3386,7 @@ function boot(){
   HAZARDS=HAZARDS.filter(h=>h.expires>Date.now());
   buildKmAnchors(); renderHazKinds(); renderHazards(); renderKm(); drawHazLayer();
   try{ const rn=Store.get(K('roadnet'),null); if(rn&&rn.length) loadRoadNet(rn); }catch(e){}
+  try{ const ic=Store.get(K('ic'),null); if(ic&&ic.length) loadInterchanges(ic); else icStatus(''); }catch(e){}
   roadStatus('');
   // 隔了很久才回來就當作新的一趟
   if(Date.now()-(TRIP.lastT||TRIP.startT)>3*3600e3) TRIP=newTrip();
@@ -3252,9 +3431,11 @@ function boot(){
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
              cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
-             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();},updateTrip,
+             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();IC.said.clear();IC.lastAt=0;},updateTrip,
              upcomingCams,renderTrip,fmtKm,fmtDur,
              openFabMenu,closeFabMenu,armFabMenu,fabMenuOpen,FAB_MENU_MS,
+             passedCams,announcePassed,
+             IC,loadInterchanges,icTick,icStatus,
              hazScore,scoreLabel,SCORE_SPEAK,SCORE_SHOW,HALF_LIFE,
              hazTiers,roadSpeak,evaluateHazards,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
              REPORTS:()=>REPORTS,setReports:a=>{REPORTS=a;Store.set(K('reports'),REPORTS);rebuildDB();},

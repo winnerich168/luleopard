@@ -54,11 +54,22 @@ jobs:
             echo "路網已存在且不是月初，略過"
           fi
 
+      # 交流道：資料量小、幾乎不變動，跟路網一樣每月重建一次就好
+      - name: 建立交流道資料（每月一次）
+        continue-on-error: true          # Overpass 忙碌時不要害整個流程失敗
+        run: |
+          if [ ! -f docs/data/interchanges.min.json ] || [ "$(date +%d)" = "01" ]; then
+            python3 etl/build_interchanges.py --out docs/data --fail-under 100
+          else
+            echo "交流道資料已存在且不是月初，略過"
+          fi
+
       - name: 顯示報告
         if: always()
         run: |
           cat docs/data/report.md >> $GITHUB_STEP_SUMMARY
           [ -f docs/data/roadnet.report.md ] && cat docs/data/roadnet.report.md >> $GITHUB_STEP_SUMMARY || true
+          [ -f docs/data/interchanges.report.md ] && cat docs/data/interchanges.report.md >> $GITHUB_STEP_SUMMARY || true
 
       - name: 上傳報告當作 artifact
         if: always()

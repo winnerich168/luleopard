@@ -1,5 +1,5 @@
 /* 鹿豹 Service Worker — 由 scripts/build-pages.mjs 產生，不要手改 */
-const VER = '88e7ed32ea84';
+const VER = 'e35c0ed1b7f4';
 const CACHE = 'luleopard-' + VER;
 
 // App 本體：一定要快取，離線就靠這些
