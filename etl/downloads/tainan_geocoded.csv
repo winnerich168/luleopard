@@ -1,0 +1,6 @@
+CityName,RegionName,Address,Longitude,Latitude,direct,limit,geocode_method
+臺南市,永康區,中華路與中華二路口,120.233914,23.008473,北往南向,50,intersection
+臺南市,永康區,中華路與中央路口,120.215920,23.023286,多向,50,intersection
+臺南市,東區,中華東路三段與崇明路口,120.223187,22.974269,多向,60,intersection
+臺南市,北區,公園路與公園南路口,120.208802,23.001041,多向,50,intersection
+臺南市,永康區,中正北路與王行路口,120.271381,23.053586,雙向,70,intersection

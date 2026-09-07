@@ -1,17 +1,17 @@
 # 鹿豹 · 測速點位合併報告
 
-產生時間：2026-08-31T08:14:30+08:00（耗時 964.7s）
+產生時間：2026-09-07T12:22:40+08:00（耗時 2065.4s）
 
 ## 總覽
 
 | 項目 | 數量 |
 |---|---|
-| **合併後總點數** | **2100** |
+| **合併後總點數** | **2105** |
 | 跨來源重複合併 | 369 |
 | 區間測速 | 63 |
-| 有速限資訊 | 2018 (96%) |
-| 有方向資訊 | 2027 (97%) |
-| 成功來源 | 7 / 13 |
+| 有速限資訊 | 2023 (96%) |
+| 有方向資訊 | 2032 (97%) |
+| 成功來源 | 8 / 13 |
 
 ## 各來源
 
@@ -24,7 +24,7 @@
 | 桃園市測速照相設備地點 | 六都 | 118 | cp950 | https://opendata.tycg.gov.tw/api/dataset/ecd45ee5-4489-436b-bd08-7d4e4 |
 | 臺中市科技執法取締地點 | 六都 | 77 | utf-8-sig | https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download |
 | 臺南市智慧管理科技執法設備設置地點 | 六都 | — | utf-8-sig | **失敗** |
-| 臺南市科技執法設備（座標為 geocoding 推算） | 六都 | — | — | **失敗** |
+| 臺南市科技執法設備（座標為 geocoding 推算） | 六都 | 5 | utf-8-sig | 檔案 tainan_geocoded.csv |
 | 高雄市111年固定式違規照相及科技執法設置地點 | 六都 | — | — | **失敗** |
 | 高雄市109年固定式違規闖紅燈及測速照相設備設置地點 | 六都 | — | — | **失敗** |
 | 澎湖縣固定式測速照相地點 | 離島 | 33 | utf-8-sig | https://opendata.penghu.gov.tw/dataset/99f233c2-df0b-4291-b899-81ac368 |
@@ -33,18 +33,16 @@
 
 ### 失敗的來源
 
-- **國道公路固定式測速照相地點**：https://www.tgos.tw/tgos/VirtualDir/Product/c2dd3a68-cafc-48fc-8a4a-7215ddc24cd3/1150720-國 → UnicodeEncodeError: 'ascii' codec can't encode characters in position 74-86: ordinal not in range(128)
+- **國道公路固定式測速照相地點**：https://www.tgos.tw/tgos/VirtualDir/Product/c2dd3a68-cafc-48fc-8a4a-7215ddc24cd3/1150720-國 → HTTPError: HTTP Error 403: Forbidden
 
-- **臺南市智慧管理科技執法設備設置地點**：https://soa.tainan.gov.tw/Api/Service/Get/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → URLError: <urlopen error timed out> | https://data.tainan.gov.tw/File/ResourceCsvDownload/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → ValueError: 找不到經緯度欄位（欄位為：Seq, 編號, 轄區分局, 行政區, 設置位置, 拍攝
+- **臺南市智慧管理科技執法設備設置地點**：https://soa.tainan.gov.tw/Api/Service/Get/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → URLError: <urlopen error [Errno 110] Connection timed out> | https://data.tainan.gov.tw/File/ResourceCsvDownload/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → ValueError: 找不到經緯度欄位（欄位為：Seq, 編號, 轄區分局, 行政區, 設置位置, 拍攝
 行向, 速限）
 
-- **臺南市科技執法設備（座標為 geocoding 推算）**：這個來源沒有登記任何網址
+- **高雄市111年固定式違規照相及科技執法設置地點**：https://openapi.kcg.gov.tw/Api/Service/Get/d300ae36-e3b7-41c1-aa27-39c48a6f8c4b → URLError: <urlopen error [Errno 110] Connection timed out> | https://data.kcg.gov.tw/File/directDownload/d300ae36-e3b7-41c1-aa27-39c48a6f8c4b → URLError: <urlopen error [Errno 110] Connection timed out>
 
-- **高雄市111年固定式違規照相及科技執法設置地點**：https://openapi.kcg.gov.tw/Api/Service/Get/d300ae36-e3b7-41c1-aa27-39c48a6f8c4b → URLError: <urlopen error timed out> | https://data.kcg.gov.tw/File/directDownload/d300ae36-e3b7-41c1-aa27-39c48a6f8c4b → URLError: <urlopen error timed out>
+- **高雄市109年固定式違規闖紅燈及測速照相設備設置地點**：https://openapi.kcg.gov.tw/Api/Service/Get/5dbf35bc-8bc2-4fbf-9204-d82daaa3e23c → URLError: <urlopen error [Errno 110] Connection timed out> | https://data.kcg.gov.tw/File/DirectDownload/5dbf35bc-8bc2-4fbf-9204-d82daaa3e23c → URLError: <urlopen error [Errno 110] Connection timed out>
 
-- **高雄市109年固定式違規闖紅燈及測速照相設備設置地點**：https://openapi.kcg.gov.tw/Api/Service/Get/5dbf35bc-8bc2-4fbf-9204-d82daaa3e23c → URLError: <urlopen error timed out> | https://data.kcg.gov.tw/File/DirectDownload/5dbf35bc-8bc2-4fbf-9204-d82daaa3e23c → URLError: <urlopen error timed out>
-
-- **新竹市科學儀器及科技執法取締地點**：https://tra.hccp.gov.tw/pages/camera → ValueError: 找不到經緯度欄位（欄位為：<!DOCTYPE html>）
+- **新竹市科學儀器及科技執法取締地點**：https://tra.hccp.gov.tw/pages/camera → ValueError: 抓回來的是 HTML 網頁而不是資料檔，且頁面裡沒有可解析的表格 —— 來源網址可能已失效或改版，請到來源頁面重新取得下載網址
 
 
 ## 縣市覆蓋
@@ -56,7 +54,7 @@
 | 新北市 | 191 |
 | （無法判斷） | 169 |
 | 臺北市 | 165 |
-| 臺南市 | 137 |
+| 臺南市 | 142 |
 | 高雄市 | 126 |
 | 雲林縣 | 97 |
 | 屏東縣 | 96 |
