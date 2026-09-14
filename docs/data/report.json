@@ -1,11 +1,11 @@
 {
-  "generated": "2026-09-07T12:22:40+08:00",
-  "elapsed_sec": 2065.4,
-  "total_points": 2105,
-  "merged_duplicates": 369,
+  "generated": "2026-09-14T08:17:18+08:00",
+  "elapsed_sec": 2084.5,
+  "total_points": 2103,
+  "merged_duplicates": 354,
   "sections": 63,
-  "with_speed_limit": 2023,
-  "with_direction": 2032,
+  "with_speed_limit": 2021,
+  "with_direction": 2030,
   "sources": [
     {
       "id": "freeway",
@@ -73,7 +73,7 @@
       "id": "newtaipei",
       "name": "新北市固定式測速照相地點",
       "group": "六都",
-      "points": 190,
+      "points": 173,
       "encoding": "utf-8-sig",
       "origin": "https://data.ntpc.gov.tw/api/datasets/99f3ff6e-0352-4399-a726-775ab765a1dc/csv/file",
       "reason": null,
@@ -263,7 +263,7 @@
   "by_county": {
     "臺中市": 250,
     "桃園市": 213,
-    "新北市": 191,
+    "新北市": 189,
     "（無法判斷）": 169,
     "臺北市": 165,
     "臺南市": 142,
