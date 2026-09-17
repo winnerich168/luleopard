@@ -691,7 +691,7 @@ const K=k=>'lp.'+k;
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.5';
+const APP_VER='v1.8';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -764,18 +764,77 @@ function destPoint(lat,lon,brg,m){
 
 /* ---------- 5. 方向字串 → 允許航向 ---------- */
 const DIR_TOL=62;
+/* ═══════════════════════════════════════════════════════════
+   方向字串解析
+
+   實地回報：往北開卻一直報南下的測速照相。查了實際資料才發現，
+   政府開放資料裡「方向」欄位有 173 種寫法，而其中最常見的兩種
+   被舊版解析成了**相反方向**：
+
+     「北向南」= 由北往南 = 南下   → 舊版比對到「北向」判成北上  ✗
+     「南向北」= 由南往北 = 北上   → 舊版比對到「南向」判成南下  ✗
+
+   這兩種加上「西向東 / 東向西」共 642 個點方向全反，等於對向的
+   測速照相一路報給你聽。
+
+   關鍵在於「A向B」的語意是**終點 B 才是行進方向**，不能用子字串
+   碰到什麼算什麼。所以改成有先後順序的規則，先長後短：
+
+     1. 軸向雙向   南北雙向 / 東西向 / 北南相向  → 兩個方向都算
+     2. 整個欄位裡有兩組以上方向（南向北…北向南、南向60北向70）→ 都算
+     3. A 向/往/至 B                          → 取 B
+     4. 往/向/朝 B                            → 取 B（但 B 後面要是句尾或
+        方向/上下/括號，否則「往南崁」「往南桃園交流道」會被當成南下）
+     5. 北上 / 南下                           → 台灣國道慣用語
+     6. A向 / A行 / A方向                     → 取 A
+     7. 都不符 → null（不限方向，寧可多報不要漏報）
+
+   最後再補一刀：只解析出單一方向、但字串裡有「雙」的（例：東往西(雙向)），
+   把反向也加回去。 ═══════════════════════════════════════════════════════════ */
+const COMPASS={
+  '北':0,'東':90,'南':180,'西':270,
+  '東北':45,'北東':45,'東南':135,'南東':135,
+  '西南':225,'南西':225,'西北':315,'北西':315
+};
+const DIRTOK='([東西南北]{1,2})';
+
+const uniqSort=a=>[...new Set(a)].sort((x,y)=>x-y);
+
+function dirCore(s){
+  // 1. 軸向雙向：南北雙向、東西向、北南相向、台15線(南北雙向)…
+  if(/(南北|北南)(雙|向|相|$)/.test(s)) return [0,180];
+  if(/(東西|西東)(雙|向|相|$)/.test(s)) return [90,270];
+  /* 2a. 同一欄位寫了兩組「A向B」：「南向北(區間測速)北向南(區間測速)」 */
+  const ends=uniqSort([...s.matchAll(new RegExp(DIRTOK+'(?:向|往|至|到|→)'+DIRTOK,'g'))]
+    .map(x=>COMPASS[x[2]]).filter(x=>x!=null));
+  if(ends.length>=2) return ends;
+  /* 2b. 一個欄位塞了兩個方向：「南向60北向70」= 兩個方向各自的速限。
+     用「X向後面不接方位字」來辨識，才不會把「北向南」誤拆成兩個。 */
+  const multi=uniqSort([...s.matchAll(new RegExp(DIRTOK+'(?:向|往)(?![東西南北])','g'))]
+    .map(x=>COMPASS[x[1]]).filter(x=>x!=null));
+  if(multi.length>=2) return multi;
+  // 3. 「A 向/往/至 B」→ 終點 B 才是行進方向（北向南 = 南下）
+  if(ends.length===1) return ends;
+  /* 4. 「往B」「向B」「朝B」。B 後面必須是句尾、方向/上下、或括號等符號，
+     否則「往南崁方向」「往南桃園交流道」「往西勢湖路」會被當成真的方向。 */
+  let m=s.match(new RegExp('(?:往|向|朝)'+DIRTOK+'(?=$|[方向上下線、（）()〔〕\\[\\]/／,，。]|區間)'));
+  if(m&&COMPASS[m[1]]!=null) return [COMPASS[m[1]]];
+  // 5. 台灣國道慣用語
+  if(/北上/.test(s)) return [0];
+  if(/南下/.test(s)) return [180];
+  // 6. 「A向」「A行」「A方向」「A側」
+  m=s.match(new RegExp(DIRTOK+'(?:向|行|方向|側|線道)'));
+  if(m&&COMPASS[m[1]]!=null) return [COMPASS[m[1]]];
+  return null;                       // 看不懂就不限方向
+}
+
 function dirHeadings(s){
   if(!s) return null;
-  s=String(s);
-  const set=[];
-  const has=t=>s.indexOf(t)>=0;
-  if(has('南北雙向')||has('南北向')) set.push(0,180);
-  if(has('東西雙向')||has('東西向')) set.push(90,270);
-  if(has('北上')||has('南往北')||has('北向')) set.push(0);
-  if(has('南下')||has('北往南')||has('南向')) set.push(180);
-  if(has('西往東')||has('東向')) set.push(90);
-  if(has('東往西')||has('西向')) set.push(270);
-  return set.length? Array.from(new Set(set)) : null; // null = 不限方向
+  s=String(s).replace(/\s+/g,'');
+  const out=dirCore(s);
+  // 只讀出單一方向、字串卻寫著「雙」：例「東往西(雙向)」→ 兩向都要報
+  if(out&&out.length===1&&/雙/.test(s)) return uniqSort([out[0],(out[0]+180)%360]);
+  return out;
 }
 function dirMatch(cam,heading){
   if(!CFG.dirFilter) return true;

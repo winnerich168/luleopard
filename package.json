@@ -1,6 +1,6 @@
 {
   "name": "luleopard",
-  "version": "1.5.0",
+  "version": "1.8.0",
   "private": true,
   "description": "鹿豹 · 台灣道路測速照相與區間測速預報，結合 GPS、掉落物與路況回報。單一 HTML 檔，可加到手機主畫面使用。",
   "keywords": [
