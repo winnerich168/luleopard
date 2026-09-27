@@ -1,0 +1,125 @@
+/* test19 — 開啟就自動載入官方網站上的資料
+
+   以前交流道與「全台合併資料源」都要使用者自己到設定頁貼網址、按載入；
+   沒弄的人只有內建的 315 個點，交流道也從來不會播報。
+   而且整份 CFG 存在裝置裡，光改預設值對舊使用者沒有作用，必須補一次搬遷。
+
+   這支把頁面當成放在 GitHub Pages 上開啟（用 page.route 模擬，不真的連網），
+   資料檔從本機 docs/data/ 供應。
+*/
+const { chromium } = require('playwright');
+const path = require('path');
+const fs = require('fs');
+
+const SITE = 'https://winnerich168.github.io/luleopard/';
+const HTML = fs.readFileSync(path.join(__dirname, 'luleopard.html'), 'utf8');
+const IC_JSON = fs.readFileSync(path.join(__dirname, 'docs/data/interchanges.min.json'), 'utf8');
+const CAM_JSON = fs.readFileSync(path.join(__dirname, 'docs/data/speedcams.min.json'), 'utf8');
+
+async function open(browser, { legacyCfg, fileUrl } = {}) {
+  const LEAFLET = fs.readFileSync(require.resolve('leaflet/dist/leaflet.js'), 'utf8');
+  const page = await (await browser.newContext({ locale: 'zh-TW' })).newPage();
+  const errs = [], hits = [];
+  page.on('pageerror', e => errs.push('PAGEERROR: ' + e.message));
+  await page.route('**/*', r => {
+    const u = r.request().url();
+    if (/leaflet.*\.js/.test(u)) return r.fulfill({ contentType: 'text/javascript', body: LEAFLET });
+    if (/leaflet.*\.css/.test(u)) return r.fulfill({ contentType: 'text/css', body: '' });
+    if (u.startsWith(SITE + 'data/')) {
+      hits.push(u.slice(SITE.length));
+      if (u.endsWith('interchanges.min.json')) return r.fulfill({ contentType: 'application/json', body: IC_JSON });
+      if (u.endsWith('speedcams.min.json')) return r.fulfill({ contentType: 'application/json', body: CAM_JSON });
+      return r.fulfill({ status: 404, body: '' });
+    }
+    if (u === SITE || u === SITE + 'index.html') return r.fulfill({ contentType: 'text/html', body: HTML });
+    if (u.startsWith('file:')) return r.continue();
+    return r.abort();
+  });
+  await page.addInitScript(cfg => {
+    Object.defineProperty(window, 'speechSynthesis', {
+      value: { speak: u => (window.__said = window.__said || []).push(u.text), cancel: () => {},
+               getVoices: () => [], onvoiceschanged: null }, configurable: true });
+    window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+    navigator.vibrate = () => true;
+    if (cfg && !localStorage.getItem('__seeded')) {
+      localStorage.setItem('lp.cfg', JSON.stringify(cfg)); localStorage.setItem('__seeded', '1');
+    }
+  }, legacyCfg || null);
+  await page.goto(fileUrl ? 'file://' + path.join(__dirname, 'luleopard.html') : SITE);
+  await page.waitForTimeout(3500);
+  return { page, errs, hits };
+}
+
+(async () => {
+  const browser = await chromium.launch();
+  const R = {};
+
+  /* 1. 新使用者：直接開就自動載入 */
+  {
+    const { page, errs, hits } = await open(browser);
+    R.新使用者 = await page.evaluate(() => ({
+      點數: LP.CAMS().length, 交流道: LP.IC.items.length, 已載入: LP.IC.loaded,
+      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl,
+      交流道狀態: document.getElementById('icStat').textContent }));
+    R.新使用者.請求 = hits; R.新使用者.errors = errs;
+
+    /* 交流道 3 公里前播報：往北開向一個交流道 */
+    R.交流道播報 = await page.evaluate(async () => {
+      await new Promise(r => setTimeout(r, 1000));
+      const it = LP.IC.items.find(x => x[2] && x[0] > 24 && x[0] < 25);
+      LP.CFG.useSeed = false; LP.clearPacks();        // 避開測速警示的節流
+      LP.resetTrip(); window.__said = [];
+      const M = 1 / 111320, v = 100 / 3.6;
+      let at = null;
+      for (let d = 4200; d > 1500; d -= v) {
+        LP.onPos(it[0] - d * M, it[1], 0, v, 5, false);
+        if (at == null && window.__said.some(t => t.includes(it[2]))) at = Math.round(d);
+        await new Promise(r => setTimeout(r, 5));
+      }
+      return { 名稱: it[2], 語音: window.__said.filter(t => t.includes('交流道')), 播報時距離: at };
+    });
+    await page.context().close();
+  }
+
+  /* 2. 舊使用者：裝置裡存著「網址空白、自動更新關閉」的舊設定 */
+  {
+    const { page, errs } = await open(browser, { legacyCfg: { feedUrl: '', feedAuto: false, icUrl: '', voice: true } });
+    R.舊使用者 = await page.evaluate(() => ({
+      點數: LP.CAMS().length, 交流道: LP.IC.items.length,
+      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl }));
+    R.舊使用者.errors = errs;
+    await page.context().close();
+  }
+
+  /* 3. 已經搬遷過、又自己清掉交流道的人：尊重他的選擇，不再自動抓 */
+  {
+    const { page, hits } = await open(browser, { legacyCfg: { autoData1: 1, icUrl: '', feedUrl: '', feedAuto: false } });
+    R.自己關掉 = await page.evaluate(() => ({ 交流道: LP.IC.items.length, 點數: LP.CAMS().length }));
+    R.自己關掉.請求 = hits;
+    await page.context().close();
+  }
+
+  /* 4. file:// 開檔（本機開發、其他測試）不自動連網 */
+  {
+    const { page, hits } = await open(browser, { fileUrl: true });
+    R.本機開檔 = { 請求: hits };
+    await page.context().close();
+  }
+
+  console.log(JSON.stringify(R, null, 2));
+  const fails = [];
+  const ok = (n, c) => { if (!c) fails.push(n); };
+  ok('新使用者自動載入全台點位', R.新使用者.點數 > 1500);
+  ok('新使用者自動載入交流道', R.新使用者.已載入 && R.新使用者.交流道 > 400);
+  ok('預設開啟自動更新', R.新使用者.feedAuto === true && /speedcams\.min\.json$/.test(R.新使用者.feedUrl));
+  ok('交流道有播報', R.交流道播報.語音.length >= 1);
+  ok('交流道在 3 公里左右播報', R.交流道播報.播報時距離 != null && Math.abs(R.交流道播報.播報時距離 - 3000) <= 150);
+  ok('舊使用者也自動補上資料源', R.舊使用者.點數 > 1500 && R.舊使用者.交流道 > 400 && R.舊使用者.feedAuto === true);
+  ok('自己清掉的不再自動抓', R.自己關掉.交流道 === 0 && R.自己關掉.請求.length === 0);
+  ok('file:// 不自動連網', R.本機開檔.請求.length === 0);
+  ok('沒有頁面錯誤', R.新使用者.errors.length === 0 && R.舊使用者.errors.length === 0);
+
+  await browser.close();
+  if (fails.length) { console.log('✗ 失敗：\n  ' + fails.join('\n  ')); process.exit(1); }
+  console.log('✓ test19 全部通過');
+})();

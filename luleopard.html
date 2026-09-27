@@ -458,12 +458,12 @@ textarea{resize:vertical;min-height:74px}
     <div class="card">
       <h3>🛰️ 我的資料源 <small>合併好的全台點位</small></h3>
       <div class="hint" style="margin-bottom:9px">
-        用 <code>build_speedcams.py</code> 把國道＋六都＋各縣合併後發布出來的網址。
-        設定一次，之後按一下就更新，不用再手動下載匯入。
+        預設已填好官方資料源（國道＋六都＋各縣合併，GitHub 每週重抓開放資料），
+        開啟 App 就會自動下載。也可以換成自己用 <code>build_speedcams.py</code> 發布的網址。
       </div>
       <input type="text" id="feedUrl" placeholder="https://你的帳號.github.io/專案/data/speedcams.min.json" autocomplete="off" spellcheck="false">
       <button class="btn wide primary" id="btnFeedUpdate">從資料源更新</button>
-      <div class="row"><div><label>開啟時自動更新</label><div class="hint">每天最多一次，失敗不影響離線使用</div></div>
+      <div class="row"><div><label>開啟時自動更新</label><div class="hint">每 6 小時檢查一次，失敗不影響離線使用</div></div>
         <div class="sw"><input type="checkbox" id="sFeedAuto"><span></span></div></div>
       <div class="hint" id="feedStat"></div>
     </div>
@@ -507,6 +507,7 @@ textarea{resize:vertical;min-height:74px}
       <div class="hint" style="margin-bottom:9px">
         高速行駛（時速 60 以上）時，到達交流道前 <b>3 公里</b>播報一次名稱與出口編號 ——
         決定要不要下交流道通常只有幾秒鐘，提前知道才來得及變換車道。<br>
+        預設會<b>自動從官方網站載入</b>並每 7 天更新，不用手動設定。
         資料由 <code>etl/build_interchanges.py</code> 從 OpenStreetMap 產生。<b>沒載入不影響其他功能。</b>
       </div>
       <div class="row"><div><label>交流道語音預報</label><div class="hint">關閉後只在畫面顯示，不出聲</div></div>
@@ -699,16 +700,29 @@ const APP_STAGE='公測版';
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
 const APP_BUILD='20260830.1330';
 
+/* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
+   speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
+   interchanges.min.json 由 etl/build_interchanges.py 從 OSM 產生。 */
+const DATA_BASE='https://winnerich168.github.io/luleopard/data/';
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
            t0:1000,t1:600,t2:300,t3:120,simSpd:70,
-           feedUrl:'',feedAuto:false,feedLast:0,feedCount:0,
-           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:'',
+           feedUrl:DATA_BASE+'speedcams.min.json',feedAuto:true,feedLast:0,feedCount:0,
+           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:DATA_BASE+'interchanges.min.json',icLast:0,
            powerSave:true,powerAfterMin:5,
            roadUrl:'',roadCount:0,
            tdxId:'',tdxSecret:'',
            tdxPath:'https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/Freeway/Section?%24top=50&%24format=JSON'};
 let CFG=Object.assign({},DEF,Store.get(K('cfg'),{}));
 const saveCfg=()=>Store.set(K('cfg'),CFG);
+/* 舊版的預設是「資料源網址空白、不自動更新」，而且整份 CFG 都存進裝置裡，
+   改 DEF 對舊使用者沒有作用 —— 他們會一直只有內建的 315 點、沒有交流道。
+   這裡補一次：網址空白的才填上官方來源並打開自動更新。只做一次，
+   之後使用者自己清掉或關掉就尊重他的選擇。 */
+if(!CFG.autoData1){
+  if(!CFG.feedUrl){ CFG.feedUrl=DEF.feedUrl; CFG.feedAuto=true; }
+  if(!CFG.icUrl) CFG.icUrl=DEF.icUrl;
+  CFG.autoData1=1; saveCfg();
+}
 
 /* ---------- 2. 內建示範點位 ---------- */
 /* [lat, lon, 速限, 方向, 名稱]
@@ -2002,7 +2016,7 @@ async function tdxAuth(){
   tdxToken=j.access_token; tdxExp=Date.now()+(j.expires_in||86400)*1000;
   return tdxToken;
 }
-async function fetchTraffic(){
+async function fetchTraffic(silent){
   el('tdxStat').textContent='連線中…';
   try{
     const tk=await tdxAuth();
@@ -2016,10 +2030,10 @@ async function fetchTraffic(){
             o.TravelSpeed!=null?(o.TravelSpeed+' km/h'):''].filter(Boolean).join(' · '),
       kind:'TDX', t:Date.now(), lat:o.PositionLat||o.Latitude, lon:o.PositionLon||o.Longitude }));
     el('tdxStat').textContent='✅ 連線成功，取得 '+TRAFFIC.length+' 筆';
-    renderTraffic(); toast('已更新 '+TRAFFIC.length+' 筆即時路況');
+    renderTraffic(); if(!silent) toast('已更新 '+TRAFFIC.length+' 筆即時路況');
   }catch(e){
     el('tdxStat').textContent='❌ '+e.message+'（瀏覽器直接呼叫可能被 CORS 擋下，正式版建議透過自己的後端代理）';
-    toast('路況取得失敗：'+e.message,4200);
+    if(!silent) toast('路況取得失敗：'+e.message,4200);
   }
 }
 
@@ -3013,6 +3027,17 @@ function loadInterchanges(arr){
   try{ Store.set(K('ic'),IC.items); }catch(e){}
   return IC.items.length;
 }
+/** 交流道資料可能是 {items:[...]} 或直接就是陣列，兩種都吃 */
+const icRows=j=>Array.isArray(j)?j:(j&&Array.isArray(j.items)?j.items:null);
+async function icFetch(url){
+  const r=await fetch(url,{cache:'no-cache'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const rows=icRows(await r.json());
+  if(!rows) throw new Error('格式不對：找不到 items 陣列');
+  const n=loadInterchanges(rows);
+  CFG.icLast=Date.now(); saveCfg();
+  return n;
+}
 function icStatus(m){
   const e=el('icMsg'); if(e) e.textContent=m||'';
   const st=el('icStat'); if(st) st.textContent= IC.loaded? IC.items.length+' 個' : '未載入';
@@ -3607,8 +3632,6 @@ function bind(){
     icEl.onchange=()=>{ CFG.icDist=parseInt(icEl.value,10)||3000; saveCfg();
       icStatus('提前距離改為 '+(CFG.icDist/1000)+' 公里'); }; }
   const icU=el('icUrl'); if(icU) icU.value=CFG.icUrl||'';
-  // 交流道資料可能是 {items:[...]} 或直接就是陣列，兩種都吃
-  const icRows=j=>Array.isArray(j)?j:(j&&Array.isArray(j.items)?j.items:null);
   const applyIc=(j,label)=>{
     const rows=icRows(j);
     if(!rows) throw new Error('格式不對：找不到 items 陣列');
@@ -3828,6 +3851,33 @@ async function doFetch(url,label){
   }
 }
 
+/**
+ * 自動載入／更新線上資料。全部靜默進行，失敗就沿用上次成功的版本，完全不影響離線使用。
+ *   測速點  每 6 小時檢查一次（來源每週更新；抓的是 194 KB 的精簡檔）
+ *   交流道  沒有資料就立刻抓，之後每 7 天更新
+ *   TDX     有填金鑰才抓，每 5 分鐘一次 —— 唯一真正「即時」的來源
+ * 用 file:// 直接開檔（本機開發、測試）時不自動連網。
+ */
+const AUTO={busy:false,tdxLast:0};
+async function autoData(){
+  if(AUTO.busy) return;
+  if(location.protocol==='file:'&&!Native.isNative) return;
+  if(typeof navigator!=='undefined'&&navigator.onLine===false) return;
+  AUTO.busy=true;
+  const now=Date.now();
+  try{
+    if(CFG.feedAuto&&CFG.feedUrl&&now-(CFG.feedLast||0)>6*3600e3) await feedUpdate(true);
+    if(CFG.icUrl&&(!IC.loaded||now-(CFG.icLast||0)>7*864e5)){
+      try{ const n=await icFetch(CFG.icUrl); icStatus('✅ 已自動載入 '+n+' 個交流道'); }
+      catch(e){ if(!IC.loaded) icStatus('自動載入失敗：'+e.message+'（有網路時會再試）'); }
+    }
+    if(CFG.tdxId&&CFG.tdxSecret&&now-AUTO.tdxLast>5*60e3){
+      AUTO.tdxLast=now;
+      await fetchTraffic(true);
+    }
+  }finally{ AUTO.busy=false; }
+}
+
 /* ---------- 20. 啟動 ---------- */
 function boot(){
   initMap(); bind();
@@ -3870,8 +3920,9 @@ function boot(){
     l.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/manifest+json'}));
     document.head.appendChild(l);
   }catch(e){}
-  // 每天最多自動更新一次資料源；失敗完全不影響離線使用
-  if(CFG.feedAuto&&CFG.feedUrl&&Date.now()-(CFG.feedLast||0)>864e5) setTimeout(()=>feedUpdate(true),1500);
+  // 自動抓資料：開啟時先跑一次，之後每 5 分鐘檢查（各自有更新間隔，不會每次都下載）
+  setTimeout(autoData,1500);
+  setInterval(autoData,5*60e3);
   // 對外測試介面
   window.LP={evaluate,dist,bearing,dirHeadings,dirMatch,onPos,CAMS:()=>CAMS,CFG,tierDist,feedUpdate,
              parseKmName,buildKmAnchors,kmEstimate,kmLock,kmToLatLon,kmChoices,KM,
@@ -3898,7 +3949,7 @@ function boot(){
              ingest,ingestZip,isZip,addPack,textToCams,parseCSV,rowsToCams,
              PACKS:()=>PACKS,clearPacks:()=>{PACKS=[];savePacks();rebuildDB();},
              APP_VER,APP_STAGE,APP_BUILD,
-             startSim,stopSim,state};
+             startSim,stopSim,state,autoData,AUTO,DATA_BASE};
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
 })();
