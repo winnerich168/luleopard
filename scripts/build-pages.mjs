@@ -44,6 +44,22 @@ if (html === before) {
   process.exit(1);
 }
 
+/* 設定頁的版號在 HTML 裡有一份寫死的後備字串，JS 載入後才會覆蓋掉。
+   問題是「沒人會去改那份後備字串」—— 從外面抓網頁（不跑 JS）看到的、
+   以及 JS 掛掉時使用者看到的，都會是上上個版本的版號，查問題時整個誤導。
+   這裡直接用 APP_VER 蓋過去，讓它不可能再漂。 */
+const VER = (html.match(/const APP_VER='([^']*)';/) || [])[1];
+if (!VER) { console.error('✗ 找不到 APP_VER —— 無法同步設定頁版號'); process.exit(1); }
+const STAGE = (html.match(/const APP_STAGE='([^']*)';/) || [])[1] || '';
+// 注意：不能用「replace 後字串有沒有變」來判斷有沒有找到 ——
+// 後備字串本來就已經是對的時候，replace 是 no-op，會被誤判成找不到。
+const VER_RE = /(<span id="setVer">)[^<]*(<\/span>)/;
+if (!VER_RE.test(html)) {
+  console.error('✗ 找不到 #setVer —— 設定頁版號沒有同步到 ' + VER);
+  process.exit(1);
+}
+html = html.replace(VER_RE, `$1${STAGE} ${VER}$2`);
+
 /* ---------- 1. <head> 補件 ---------- */
 // 用專屬的標記字串判斷有沒有注入過，不要用 'manifest.webmanifest' 這種
 // 「內容裡也可能出現」的字 —— 原始檔的註解提到它一次，整段就會被跳過，
@@ -208,6 +224,9 @@ const outHtml = readFileSync(join(outDir, 'index.html'), 'utf8');
 if (!outHtml.includes(`const APP_BUILD='${BUILD}'`)) problems.push('index.html 沒有帶上建置序號');
 if (!outHtml.includes('manifest.webmanifest')) problems.push('index.html 沒有 manifest 連結');
 if (!/const SEED=/.test(outHtml)) problems.push('index.html 找不到內建點位資料');
+// 不跑 JS 也要看得到正確版號（外部檢查、JS 掛掉時都靠這個）
+if (!outHtml.includes(`<span id="setVer">${STAGE} ${VER}<`))
+  problems.push(`index.html 的設定頁版號沒有同步成 ${VER}`);
 
 if (problems.length) {
   console.error('✗ 產出不完整，不應該發佈：');

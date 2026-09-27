@@ -604,7 +604,7 @@ textarea{resize:vertical;min-height:74px}
     <div class="card">
       <h3>ℹ️ 關於</h3>
       <div class="hint" id="aboutBox" style="line-height:1.9">
-        <b>鹿豹</b> · 台灣道路測速預報 · <span id="setVer">公測版 v1.5</span><br>
+        <b>鹿豹</b> · 台灣道路測速預報 · <span id="setVer">公測版 v1.9</span><br>
         著作權所有 © 2026 winnerich168．保留所有權利<br>
         <b style="color:var(--warn)">公測期間資料仍在補齊</b>，各縣市覆蓋狀況請看「資料」頁。
         <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line)">
@@ -691,7 +691,7 @@ const K=k=>'lp.'+k;
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.8';
+const APP_VER='v1.9';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -700,7 +700,7 @@ const APP_STAGE='公測版';
 const APP_BUILD='20260830.1330';
 
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
-           t1:600,t2:300,t3:120,simSpd:70,
+           t0:1000,t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:'',feedAuto:false,feedLast:0,feedCount:0,
            hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:'',
            powerSave:true,powerAfterMin:5,
@@ -963,6 +963,57 @@ const Audio_=(function(){
              || vs.find(v=>/^zh/i.test(v.lang)) || null; }catch(e){}
   }
   try{ speechSynthesis.onvoiceschanged=pickVoice; pickVoice(); }catch(e){}
+
+  /* ── 語音佇列 ──
+     排太久的句子（例如「前方 600 公尺」排了 8 秒才輪到）距離早就不對了，直接丟掉，
+     下一個級距會用正確的距離再唸。 */
+  const SAY_STALE=8000;
+  const sayQ=[];
+  let sayBusy=false, sayGen=0, sayWatch=null, sayUtter=null;
+  function sayDone(gen){
+    if(gen!==sayGen) return;            // 已被插隊中斷的舊句子，不要推進佇列
+    sayBusy=false; sayUtter=null; clearTimeout(sayWatch);
+    setTimeout(sayPump,120);
+  }
+  function sayCancel(){
+    sayGen++; sayBusy=false; sayUtter=null; clearTimeout(sayWatch);
+    if(Native.hasTTS) Native.stop();
+    else{ try{ speechSynthesis.cancel(); }catch(e){} }
+  }
+  /* onend 漏發時，引擎其實早就閒下來了，不要乾等看門狗。
+     網頁語音可以直接問引擎；原生 TTS 問不到，只能靠 Promise 與看門狗。 */
+  function engineIdle(){
+    if(Native.hasTTS) return false;
+    try{ return !speechSynthesis.speaking&&!speechSynthesis.pending; }catch(e){ return false; }
+  }
+  function sayPump(){
+    if(sayBusy&&engineIdle()){ sayGen++; sayBusy=false; sayUtter=null; clearTimeout(sayWatch); }
+    if(sayBusy) return;
+    const now=Date.now();
+    while(sayQ.length&&now-sayQ[0].t>SAY_STALE) sayQ.shift();
+    const it=sayQ.shift(); if(!it) return;
+    sayBusy=true;
+    const gen=++sayGen;
+    // 保險：onend 沒有回來（部分 Android／iOS 會漏發）也不能讓佇列永遠卡住
+    clearTimeout(sayWatch);
+    sayWatch=setTimeout(()=>sayDone(gen),1500+it.txt.length*350);
+    if(Native.hasTTS){
+      Native.speak(it.txt).then(()=>sayDone(gen),()=>sayDone(gen));
+      return;
+    }
+    try{
+      // Chrome 的語音引擎閒置一陣子會卡在 paused 狀態，之後 speak() 都不出聲
+      try{ if(speechSynthesis.paused) speechSynthesis.resume(); }catch(e){}
+      const u=new SpeechSynthesisUtterance(it.txt);
+      u.lang='zh-TW'; u.rate=1.05; u.pitch=1;
+      if(zhVoice) u.voice=zhVoice;
+      u.onend=()=>sayDone(gen);
+      u.onerror=()=>sayDone(gen);
+      sayUtter=u;                        // 留住參照：Chrome 會把沒人參照的 utterance 回收，onend 就不來了
+      speechSynthesis.speak(u);
+    }catch(e){ sayDone(gen); }
+  }
+
   return {
     unlock(){
       try{ ctx=ctx||new (window.AudioContext||window.webkitAudioContext)(); if(ctx.state==='suspended')ctx.resume(); }catch(e){}
@@ -979,17 +1030,29 @@ const Audio_=(function(){
         o.stop(ctx.currentTime+(dur||.16)+.02);
       }catch(e){}
     },
-    say(txt){
-      if(!CFG.voice) return false;
-      if(Native.hasTTS&&Native.speak(txt)) return true;   // 原生語音（背景也唸得出來）
-      if(!('speechSynthesis' in window)) return false;
-      try{ speechSynthesis.cancel();
-        const u=new SpeechSynthesisUtterance(txt);
-        u.lang='zh-TW'; u.rate=1.05; u.pitch=1;
-        if(zhVoice) u.voice=zhVoice;
-        speechSynthesis.speak(u); return true;
-      }catch(e){ return false; }
+    /**
+     * 播一句話。預設「排隊」：前一句還沒唸完就接在後面，不會互相切掉。
+     * urgent=true（第 3 級「就在這裡」）才會插隊並中斷目前這句。
+     *
+     * 以前每一句都先 cancel() 再 speak()，造成兩個實地回報的「不出聲」：
+     *   · 測速警示唸到一半，1 秒後事故／已通過／交流道提示一出來就把它切掉；
+     *   · Chrome／Android 的 speechSynthesis 在 cancel() 之後立刻 speak()，
+     *     新的那句常常被一起吃掉 —— 整句靜音、也不會報錯。
+     *     原生 TTS 的 stop() 是非同步的，晚一步生效時同樣會把剛開始唸的那句停掉。
+     */
+    say(txt,urgent){
+      if(!CFG.voice||!txt) return false;
+      if(!Native.hasTTS&&!('speechSynthesis' in window)) return false;
+      if(urgent){ sayQ.length=0; if(sayBusy) sayCancel(); }
+      // 同一句話已經在排了就不要重複
+      if(sayQ.some(x=>x.txt===txt)) return true;
+      sayQ.push({txt,t:Date.now()});
+      // 剛 cancel 過的話等一下再唸，避開「cancel 後立刻 speak 被吃掉」
+      if(urgent) setTimeout(sayPump,80); else sayPump();
+      return true;
     },
+    /** 測試／除錯用：目前是否還有語音在唸或排隊 */
+    get busy(){ return sayBusy||sayQ.length>0; },
     vibe(pat){ if(!CFG.vibe) return; try{ navigator.vibrate&&navigator.vibrate(pat); }catch(e){} }
   };
 })();
@@ -1022,6 +1085,19 @@ function tierDist(tier,speedMps){
     d += v*gap*(tier===1?1:0.5);
   }
   return d;
+}
+/**
+ * 遠距預告（第 0.5 級，存在 state 裡的值是 PRE）。
+ * 三個級距在時速 100 時大約是 600 → 330 → 170 公尺，第一聲只剩 20 秒反應時間。
+ * 實地回報希望「從遠到近」一路唸：先在 1 公里外預告，再一級一級倒數到眼前。
+ * 車速快時拉長成約 40 秒車程（時速 110 ≈ 1.2 公里），同樣補償定位間隔。
+ * 用 0.5 而不是另開一個 Map：比大小（tier>prev）、「警示過才算通過」(>0) 都照舊成立。
+ */
+const PRE=0.5;
+function preDist(speedMps){
+  const v=speedMps||0;
+  const base=Math.max(CFG.t0||1000, v*40);
+  return Math.max(base, tierDist(1,v)*1.25) + v*Math.min(medGap(),30);
 }
 /** 最近幾次定位的間隔中位數（秒）。還沒有樣本時回傳 0，等於不補償。 */
 function medGap(){
@@ -1059,7 +1135,7 @@ function sweptDist(pos,cam,d){
 function evaluate(pos){
   const {lat,lon,heading,speed}=pos;
   const v=speed||0;                      // m/s
-  const far=Math.max(tierDist(1,v)*1.6,1200);
+  const far=Math.max(tierDist(1,v)*1.6,preDist(v)*1.15,1200);
   // 粗篩視窗依 far 動態計算（1 緯度≈111.3km；經度依緯度收縮）
   const dLat=far/111320*1.15, dLon=far/(111320*Math.max(0.2,Math.cos(rad(lat))))*1.15;
   let best=null;
@@ -1100,6 +1176,7 @@ function evaluate(pos){
   // 但唸出來的距離要用真實的目前距離，不然會唸出一個已經不對的數字。
   let tier=0;
   if(d<=tierDist(3,v)) tier=3; else if(d<=tierDist(2,v)) tier=2; else if(d<=tierDist(1,v)) tier=1;
+  else if(d<=preDist(v)) tier=PRE;
   const prev=state.get(cam.id)||0;
 
   if(tier>prev&&tier>0){
@@ -1140,13 +1217,15 @@ function announce(cam,d,tier,over,kmh,speedOk){
   const dm=d<1000? Math.round(d/10)*10+'公尺' : (d/1000).toFixed(1)+'公里';
   const kind=cam.sec?'區間測速':'測速照相';
   let txt;
-  if(tier===1) txt=`前方${dm}，${kind}`+(cam.lim?`，速限${cam.lim}`:'');
+  if(tier===PRE) txt=`前方${dm}有${kind}`+(cam.lim?`，速限${cam.lim}`:'');
+  else if(tier===1) txt=`前方${dm}，${kind}`+(cam.lim?`，速限${cam.lim}`:'');
   else if(tier===2) txt=`注意，${dm}${kind}`+(cam.lim?`，速限${cam.lim}`:'');
   else txt=`${kind}${cam.lim?`，速限${cam.lim}`:''}`+(over?`，你目前${kmh}，請減速`:'');
   // 車速不可信時絕對不要唸「你目前 XXX，請減速」—— 唸出 14004 這種數字
   // 會讓人完全不信任這個 App。上面的 over 已由呼叫端把關，這裡再保險一次。
   if(speedOk===false) txt=txt.replace(/，你目前\d+，請減速/,'');
-  Audio_.say(txt);
+  Audio_.say(txt,tier===3);             // 第 3 級「就在這裡」插隊，其他排隊不互相切掉
+  if(tier===PRE){ Audio_.beep(560,.1,.07); Audio_.vibe(50); }
   if(tier===1){ Audio_.beep(660,.14); Audio_.vibe(80); }
   if(tier===2){ Audio_.beep(880,.16); Audio_.vibe([90,60,90]); }
   if(tier===3){ Audio_.beep(1180,.22,.13); Audio_.vibe([140,70,140,70,180]); }
@@ -1164,7 +1243,7 @@ function paintAlert(a){
     el('hudBarFill').style.width='0'; return;
   }
   const {cam,d,tier,v}=a;
-  box.className= tier? 't'+tier : '';
+  box.className= tier>=1? 't'+tier : '';
   el('alertIcon').textContent= cam.sec?'📏' : (tier===3?'🚨':tier===2?'⚠️':'📷');
   el('alertLabel').textContent= cam.sec?'區間測速':'測速照相';
   el('alertDist').textContent= d<1000? Math.round(d)+'m' : (d/1000).toFixed(1)+'km';
@@ -1214,15 +1293,17 @@ const Native=(function(){
     },
     async clearWatcher(id){ try{ await plugin('BackgroundGeolocation').removeWatcher({id}); }catch(e){} },
 
+    /** 唸一句，回傳唸完才 resolve 的 Promise。
+        不在這裡先 stop()：stop() 是非同步的，晚一步生效時會把這一句停掉。
+        要不要中斷前一句由 Audio_ 的佇列決定。 */
     speak(text){
-      if(!has('TextToSpeech')) return false;
+      if(!has('TextToSpeech')) return Promise.reject(new Error('no tts'));
       try{
-        plugin('TextToSpeech').stop().catch(()=>{});
-        plugin('TextToSpeech').speak({text,lang:'zh-TW',rate:1.05,pitch:1.0,
-          category:'playback'}).catch(()=>{});    // playback 讓背景也發得出聲音
-        return true;
-      }catch(e){ return false; }
-    }
+        return plugin('TextToSpeech').speak({text,lang:'zh-TW',rate:1.05,pitch:1.0,
+          category:'playback'});                 // playback 讓背景也發得出聲音
+      }catch(e){ return Promise.reject(e); }
+    },
+    stop(){ try{ plugin('TextToSpeech').stop().catch(()=>{}); }catch(e){} }
   };
 })();
 
@@ -1654,11 +1735,11 @@ function drawCamLayer(){
      .addTo(camLayer);
   });
 }
-/* 錐形車頭游標。圓點看不出方向，錐形的尖端就是行進方向，一眼可辨。 */
+/* 目前位置：藍點＋紅色外圈。
+   刻意不畫方向指示（錐形、三角）：航向常有偏差，畫出來反而誤導。 */
 const CONE_SVG='<svg width="34" height="34" viewBox="0 0 34 34">'
-  +'<circle cx="17" cy="17" r="15" fill="#2fd07a22"/>'
-  +'<path d="M17 2 L27 27 L17 21.5 L7 27 Z" fill="#2fd07a" stroke="#fff" stroke-width="2"'
-  +' stroke-linejoin="round"/></svg>';
+  +'<circle cx="17" cy="17" r="12" fill="none" stroke="#ff3b30" stroke-width="3"/>'
+  +'<circle cx="17" cy="17" r="7.5" fill="#1e88ff" stroke="#fff" stroke-width="2"/></svg>';
 
 let coneRot=0;                 // 目前圖示的螢幕旋轉角
 function meIcon(){
@@ -1669,9 +1750,15 @@ function paintCone(heading){
   const e=meMarker.getElement&&meMarker.getElement();
   if(!e) return;
   const svg=e.querySelector('svg'); if(!svg) return;
-  /* 地圖轉成「車頭向前」時，整張圖已經轉了 -heading，
-     所以圖示只要抵銷回來就會固定朝上；北方朝上時則直接依航向轉。 */
-  const deg = MAPROT.on ? 0 : (heading||0);
+  /* 地圖轉成「車頭向前」時，整張圖（連同這個圖示）已經被 CSS 轉了 -heading。
+     圖示要真的固定朝上，就得把那個旋轉「轉回來」，也就是 +heading。
+     以前這裡寫 0 —— 字面上看起來像「不用轉」，實際上是沒有抵銷，
+     螢幕上錐形會指在 -heading（往東開時差整整 90 度）。
+
+     抵銷用的是 MAPROT.deg 而不是 heading：setMapRotation 有 3 度的
+     防抖死區，地圖可能還停在上一個角度，拿 heading 抵銷會差那幾度。
+     用地圖「實際上轉了多少」去抵銷，才會永遠精準朝上。 */
+  const deg = MAPROT.on ? -MAPROT.deg : (heading||0);
   if(Math.abs(deg-coneRot)>0.5){ coneRot=deg; svg.style.transform='rotate('+deg+'deg)'; }
 }
 
@@ -1724,7 +1811,7 @@ function updateMapPos(p){
   if(!MAP) return;
   if(!meMarker){
     meMarker=L.marker([p.lat,p.lon],{icon:meIcon(),interactive:false,keyboard:false}).addTo(MAP);
-    meCircle=L.circle([p.lat,p.lon],{radius:p.acc||20,color:'#2fd07a',weight:1,fillOpacity:.07}).addTo(MAP);
+    meCircle=L.circle([p.lat,p.lon],{radius:p.acc||20,color:'#1e88ff',weight:1,fillOpacity:.07}).addTo(MAP);
     MAP.setView([p.lat,p.lon],15);
   } else {
     meMarker.setLatLng([p.lat,p.lon]); meCircle.setLatLng([p.lat,p.lon]).setRadius(p.acc||20);
@@ -2265,7 +2352,12 @@ const HAZ_TYPES=[
   {k:'動物',    i:'🐕', sev:2, ttl:1*3600e3},
   {k:'臨檢',    i:'👮', sev:1, ttl:3*3600e3},
 ];
-const hazMeta=k=>HAZ_TYPES.find(x=>x.k===k)||{k,i:'⚠️',sev:2,ttl:2*3600e3};
+/* 不在一鍵回報選單裡、只會從 TDX 進來的類型 */
+const HAZ_EXTRA=[
+  {k:'道路管制',i:'⛔', sev:2, ttl:3*3600e3},
+  {k:'路況事件',i:'⚠️', sev:1, ttl:2*3600e3},
+];
+const hazMeta=k=>HAZ_TYPES.find(x=>x.k===k)||HAZ_EXTRA.find(x=>x.k===k)||{k,i:'⚠️',sev:2,ttl:2*3600e3};
 
 /* 置信度半衰期（分鐘）。跟後端同一組數字，沒連後端時本機也能自己衰減。 */
 const HALF_LIFE={'事故':25,'車輛故障':20,'掉落物':45,'塞車':15,'施工':240,
@@ -2318,11 +2410,51 @@ function hazTiers(h,v){
   return [Math.max(500,v*30),Math.max(250,v*15),Math.max(100,v*6)];
 }
 
+/**
+ * 其他來源的路況，一律轉成 HAZARDS 的格式一起評估、一起播報。
+ * 以前只有「一鍵回報」和後端拉回來的 HAZARDS 會唸；
+ * 從「回報」頁在地圖上點選新增的事故／施工／坑洞（存在 REPORTS），
+ * 以及 TDX 抓回來、有座標的即時事件，都只會列在清單裡，開到旁邊也不出聲。
+ * id 要穩定，hazState 才記得住「已經唸到第幾級」，不會每一筆定位都重唸。
+ */
+const REP_HAZ={'事故':'事故','施工':'施工','坑洞':'路面坑洞'};
+function tdxHazType(t){
+  t=String(t||'');
+  if(/事故|車禍|追撞|碰撞|翻覆/.test(t)) return '事故';
+  if(/故障|拋錨/.test(t)) return '車輛故障';
+  if(/掉落|散落|落物/.test(t)) return '掉落物';
+  if(/施工|維修|工程/.test(t)) return '施工';
+  if(/壅塞|回堵|車多|塞車/.test(t)) return '塞車';
+  if(/積水|淹水/.test(t)) return '積水';
+  if(/管制|封閉|封路/.test(t)) return '道路管制';
+  return '路況事件';
+}
+function extraHazards(now){
+  const out=[];
+  for(const r of REPORTS){
+    const type=REP_HAZ[r.kind]; if(!type) continue;
+    const ttl=hazMeta(type).ttl;
+    if(r.t+ttl<=now) continue;
+    out.push({id:'rp_'+r.id,type,lat:r.lat,lon:r.lon,road:'',roadClass:'一般道路',km:null,lane:'',
+              brg:null,t:r.t,lastReport:r.t,expires:r.t+ttl,confirms:0,reports:1,note:r.note||''});
+  }
+  for(const o of TRAFFIC){
+    const la=+o.lat, lo=+o.lon;
+    if(!isFinite(la)||!isFinite(lo)||!la||!lo) continue;
+    const type=tdxHazType(o.title+' '+(o.meta||''));
+    const fast=/國道|國\d|快速道路|台6[1-8]|高架/.test(o.title+' '+(o.meta||''));
+    out.push({id:'tdx_'+la.toFixed(5)+'_'+lo.toFixed(5)+'_'+type,type,lat:la,lon:lo,road:'',
+              roadClass:fast?'國道':'一般道路',km:null,lane:'',brg:null,
+              t:o.t,lastReport:o.t,expires:o.t+hazMeta(type).ttl,confirms:0,reports:1,official:'open'});
+  }
+  return out;
+}
+
 const hazState=new Map();
 function evaluateHazards(pos){
   const {lat,lon,heading}=pos, v=pos.speed||0, now=Date.now();
   let best=null;
-  for(const h of HAZARDS){
+  for(const h of HAZARDS.concat(extraHazards(now))){
     if(h.expires<=now||h.hidden) continue;
     // 置信度太低就當作不存在（時間衰減 + 車流否證的結果）
     const sc=hazScore(h,now);
@@ -2384,7 +2516,7 @@ function announceHaz(h,d,tier){
   if(tier===1) txt='前方'+dm+'，'+who+'注意'+h.type+where;
   else if(tier===2) txt='注意，'+dm+'有'+h.type+(h.lane?'，'+h.lane:'')+(rep>=3?('，'+rep+'人回報'):'');
   else txt=h.type+'就在前方'+(h.lane?'，'+h.lane:'')+'，請小心';
-  Audio_.say(txt);
+  Audio_.say(txt,tier===3);
   const s=hazMeta(h.type).sev;
   if(tier===1){ Audio_.beep(520,.16); Audio_.vibe(90); }
   if(tier===2){ Audio_.beep(700,.18); Audio_.vibe([100,60,100]); }
@@ -3755,7 +3887,7 @@ function boot(){
              passedCams,announcePassed,
              IC,loadInterchanges,icTick,icStatus,
              hazScore,scoreLabel,SCORE_SPEAK,SCORE_SHOW,HALF_LIFE,
-             hazTiers,roadSpeak,evaluateHazards,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
+             hazTiers,roadSpeak,evaluateHazards,extraHazards,tdxHazType,preDist,PRE,Audio_,setTraffic:a=>{TRAFFIC=a;},addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
              REPORTS:()=>REPORTS,setReports:a=>{REPORTS=a;Store.set(K('reports'),REPORTS);rebuildDB();},
              HAZARDS:()=>HAZARDS,setHazards:a=>{HAZARDS=a;},hazState,pullHazards,voteHazard,isFastRoad,
              retractHazard,probeTick,sendProbe,cruiseSpeed,cruiseSample,PROBE,

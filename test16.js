@@ -29,6 +29,24 @@ const fs = require('fs');
                set onvoiceschanged(v) {}, get onvoiceschanged() { return null } }, configurable: true });
     window.SpeechSynthesisUtterance = function (t) { this.text = t; };
     navigator.vibrate = () => true;
+
+    /* 錐形「在螢幕上真正指向哪裡」。
+       以前只檢查 svg.style.transform 是不是 rotate(0deg)，結果實地開車
+       才發現往東時錐形偏了 90 度 —— 字串是對的，畫面是錯的。錐形是地圖的
+       子元素，地圖被 CSS 轉過之後它會一起轉，光看自己的 inline style
+       完全看不出來。改成用 getScreenCTM 把 SVG 的尖端與中心都換算到螢幕
+       座標再量夾角，祖先的旋轉就會一併算進去。 */
+    window.__coneAngle = () => {
+      const svg = document.querySelector('.mecone svg');
+      if (!svg) return null;
+      const m = svg.getScreenCTM();
+      if (!m) return null;
+      const to = (x, y) => ({ x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f });
+      const tip = to(17, 2), mid = to(17, 17);          // 尖端、中心（SVG 內部座標）
+      const dx = tip.x - mid.x, dy = tip.y - mid.y;
+      // 螢幕 y 軸向下，朝上 = dy 為負。換算成羅盤角：0 = 畫面正上方，順時針為正
+      return Math.round((Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360);
+    };
   });
   await page.goto('file://' + path.join(__dirname, 'luleopard.html'));
   await page.waitForTimeout(1200);
@@ -48,24 +66,39 @@ const fs = require('fs');
     LP.onPos(24.5, 120.81, 180, 100 / 3.6, 8, true);    // 往南
     await new Promise(r => setTimeout(r, 120));
     const south = document.querySelector('.mecone svg').style.transform;
+    const cs = [...document.querySelectorAll('.mecone circle')];
     return { 有錐形: !!e, 有三角形路徑: !!document.querySelector('.mecone path'),
+             有紅圈: cs.some(c => c.getAttribute('stroke') === '#ff3b30' && c.getAttribute('fill') === 'none'),
+             有藍點: cs.some(c => c.getAttribute('fill') === '#1e88ff'),
              往東時: east, 往南時: south };
   });
 
   /* 2. 車頭向前 */
   R.車頭向前 = await page.evaluate(async () => {
     LP.CFG.mapRotate = true; LP.MAPROT.on = true;
+    // 地圖旋轉有 .25s 的 CSS transition，量螢幕角度要等它跑完，
+    // 不然量到的是動畫中間的值（這個坑讓我一開始以為修壞了）
+    const settle = () => new Promise(r => setTimeout(r, 400));
     LP.onPos(24.5, 120.8, 45, 100 / 3.6, 8, true);
-    await new Promise(r => setTimeout(r, 120));
+    await settle();
     const t45 = document.getElementById('map').style.transform;
-    const cone45 = document.querySelector('.mecone svg').style.transform;
+    const cone45 = window.__coneAngle();
     LP.onPos(24.51, 120.81, 200, 100 / 3.6, 8, true);
-    await new Promise(r => setTimeout(r, 120));
+    await settle();
     const t200 = document.getElementById('map').style.transform;
+    const cone200 = window.__coneAngle();
+    // 幾個有代表性的航向，逐一量錐形在螢幕上實際指向
+    const 各航向 = {};
+    for (const h of [0, 30, 90, 135, 180, 270, 315]) {
+      LP.onPos(24.5, 120.8, h, 100 / 3.6, 8, true);
+      await settle();
+      各航向[h] = window.__coneAngle();
+    }
     const 有rot類別 = document.getElementById('mapRot').classList.contains('rot');
     // 關掉之後要復原
     LP.CFG.mapRotate = false; LP.MAPROT.on = false; LP.setMapRotation(null);
-    return { 航向45時: t45, 航向200時: t200, 錐形抵銷: cone45,
+    return { 航向45時: t45, 航向200時: t200, 錐形螢幕角度45: cone45, 錐形螢幕角度200: cone200,
+             各航向錐形螢幕角度: 各航向,
              有旋轉類別: 有rot類別, 關閉後: document.getElementById('map').style.transform };
   });
 
@@ -160,12 +193,23 @@ const fs = require('fs');
   const fails = [];
   const ok = (n, c) => { if (!c) fails.push(n); };
   ok('Leaflet 有載入（測試前提）', R.地圖可用);
-  ok('游標是錐形不是圓點', R.錐形.有錐形 && R.錐形.有三角形路徑);
+  // 游標改成藍點＋紅色外圈。刻意不畫方向（錐形／三角）：航向常有偏差，畫出來會誤導
+  ok('游標是藍點＋紅色外圈', R.錐形.有錐形 && R.錐形.有藍點 && R.錐形.有紅圈);
+  ok('游標沒有方向指示', !R.錐形.有三角形路徑);
   ok('北方朝上時錐形跟著航向轉', /rotate\(90deg\)/.test(R.錐形.往東時 || ''));
   ok('航向改變時錐形跟著改', R.錐形.往南時 !== R.錐形.往東時);
   ok('車頭向前會旋轉地圖', /rotate\(-45deg\)/.test(R.車頭向前.航向45時 || ''));
   ok('換方向時地圖跟著轉', /rotate\(-200deg\)/.test(R.車頭向前.航向200時 || ''));
-  ok('車頭向前時錐形抵銷成朝上', /rotate\(0deg\)/.test(R.車頭向前.錐形抵銷 || ''));
+  /* 這裡量的是螢幕上真正的指向，不是 inline style —— 之前就是因為只檢查
+     style 字串，實地開車才發現錐形偏了 90 度。容許 3 度是因為地圖旋轉
+     有防抖死區。 */
+  const 偏差 = a => a == null ? 999 : Math.min(a, 360 - a);
+  ok('車頭向前時錐形在螢幕上真的朝上（航向45）', 偏差(R.車頭向前.錐形螢幕角度45) <= 3);
+  ok('車頭向前時錐形在螢幕上真的朝上（航向200）', 偏差(R.車頭向前.錐形螢幕角度200) <= 3);
+  const 各 = R.車頭向前.各航向錐形螢幕角度 || {};
+  const 偏掉的 = Object.entries(各).filter(([h, a]) => 偏差(a) > 3).map(([h, a]) => `航向${h}→${a}°`);
+  if (偏掉的.length) console.log('錐形沒朝上的航向：' + 偏掉的.join('、'));
+  ok('各個航向下錐形都朝上（不會整組偏 90 度）', 偏掉的.length === 0);
   ok('有加上旋轉用的類別', R.車頭向前.有旋轉類別);
   ok('關閉車頭向前會復原', !R.車頭向前.關閉後);
   ok('航向不可信時不亂轉', !R.航向不可信.之後);
