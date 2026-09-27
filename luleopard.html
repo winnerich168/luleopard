@@ -2380,6 +2380,7 @@ const HAZ_TYPES=[
 /* 不在一鍵回報選單裡、只會從 TDX 進來的類型 */
 const HAZ_EXTRA=[
   {k:'道路管制',i:'⛔', sev:2, ttl:3*3600e3},
+  {k:'道路災害',i:'⛰️', sev:3, ttl:6*3600e3},
   {k:'路況事件',i:'⚠️', sev:1, ttl:2*3600e3},
 ];
 const hazMeta=k=>HAZ_TYPES.find(x=>x.k===k)||HAZ_EXTRA.find(x=>x.k===k)||{k,i:'⚠️',sev:2,ttl:2*3600e3};
@@ -2491,7 +2492,7 @@ function evaluateHazards(pos){
     const d=dist(lat,lon,h.lat,h.lon);
     if(d>far){ hazState.delete(h.id); continue; }
     // 對向車道的事件不要報
-    if(CFG.dirFilter&&h.brg!=null&&heading!=null&&!isNaN(heading)&&angDiff(h.brg,heading)>70){
+    if(CFG.dirFilter&&h.brg!=null&&heading!=null&&!isNaN(heading)&&angDiff(h.brg,heading)>(h.brgTol||70)){
       hazState.delete(h.id); continue; }
     // 必須在前方
     if(heading!=null&&!isNaN(heading)&&v>1.5&&angDiff(bearing(lat,lon,h.lat,h.lon),heading)>85){
@@ -2536,7 +2537,7 @@ function announceHaz(h,d,tier){
   lastAlertAt=now;
   const dm=d<1000?Math.round(d/50)*50+'公尺':(d/1000).toFixed(1)+'公里';
   const where=h.km!=null?('，'+roadSpeak(h.road)+(h.road?' ':'')+h.km.toFixed(1)+'公里處'):'';
-  const rep=h.reports||1, who=rep>=2?(rep+'人回報，'):'';
+  const rep=h.reports||1, who=h.src==='official'?'官方通報，':rep>=2?(rep+'人回報，'):'';
   let txt;
   if(tier===1) txt='前方'+dm+'，'+who+'注意'+h.type+where;
   else if(tier===2) txt='注意，'+dm+'有'+h.type+(h.lane?'，'+h.lane:'')+(rep>=3?('，'+rep+'人回報'):'');
@@ -2563,6 +2564,9 @@ function makeHazard(o){
     lastReport:o.lastReport||o.t||now,
     serverId:o.serverId||(o.mine===false?o.id:undefined),
     iConfirmed:!!o.iConfirmed,
+    // 後端附上的官方事件（TDX）：official='open' 讓置信度不在本機衰減掉；
+    // brgTol 是方向容許角 —— 官方只給整條路的名目方向，彎道處要放寬
+    official:o.official||null,src:o.src||'',brgTol:o.brgTol||null,
     mine:o.mine!==false,synced:!!o.synced};
 }
 function addHazard(o){

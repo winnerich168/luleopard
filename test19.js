@@ -106,6 +106,42 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
     await page.context().close();
   }
 
+  /* 5. 後端附上的官方事件（TDX）：拉回來之後開過去要播報，而且說得出是官方通報 */
+  {
+    const { page, errs } = await open(browser);
+    const M = 1 / 111320, lat = 22.621562, lon = 120.532435;   // 國道三號南向 410.1K（實際資料）
+    await page.route('https://luleopard-hazards.winnerich.workers.dev/**', r => r.fulfill({
+      contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({ ok: true, hazards: [{
+        id: 'o-abc123', type: '事故', lat, lon, road: '國道三號', roadClass: '國道', dir: '南向', km: 410.1,
+        brg: 180, brgTol: 110, note: '國道三號 南向 410K+100 交通事故-事故', lane: '',
+        t: Date.now(), lastReport: Date.now(), expires: Date.now() + 20 * 60e3,
+        confirms: 0, clears: 0, reports: 1, score: 1.5, official: 'open', src: 'official', dist: 3000 }] }) }));
+    R.官方事件 = await page.evaluate(async ([lat, lon, M]) => {
+      LP.CFG.useSeed = false; LP.clearPacks(); LP.resetTrip();
+      const n = await LP.pullHazards({ lat: lat + 4000 * M, lon }, true);
+      const h = LP.HAZARDS().find(x => x.id === 'o-abc123' || x.serverId === 'o-abc123');
+      window.__said = [];
+      const v = 100 / 3.6;
+      // 往南開（航向 200°：國道在彎，跟名目方向 180° 差 20°，仍要報）
+      for (let d = 3500; d > 50; d -= v) {
+        LP.onPos(lat + d * M, lon, 200, v, 5, false);
+        await new Promise(r => setTimeout(r, 30));
+      }
+      const saidSouth = window.__said.slice();
+      // 反方向（往北，航向 0°）開過同一點：對向車道，不該報
+      LP.hazState.clear(); window.__said = [];
+      for (let d = 3500; d > 50; d -= v) {
+        LP.onPos(lat - d * M, lon, 0, v, 5, false);
+        await new Promise(r => setTimeout(r, 30));
+      }
+      return { 拉回筆數: n, 有官方標記: !!h && h.official === 'open' && h.src === 'official' && h.brgTol === 110,
+               南下語音: saidSouth.filter(t => /事故/.test(t)), 北上語音: window.__said.filter(t => /事故/.test(t)) };
+    }, [lat, lon, M]);
+    R.官方事件.errors = errs;
+    await page.context().close();
+  }
+
   console.log(JSON.stringify(R, null, 2));
   const fails = [];
   const ok = (n, c) => { if (!c) fails.push(n); };
@@ -122,6 +158,10 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
   ok('預設連上共享回報後端', R.新使用者.hazUrl === API);
   ok('舊使用者也補上後端', R.舊使用者.hazUrl === API);
   ok('file:// 不預設後端', R.本機開檔.hazUrl === '');
+  ok('官方事件拉得回來且保留官方標記', R.官方事件.拉回筆數 === 1 && R.官方事件.有官方標記);
+  ok('官方事件從遠到近播報', R.官方事件.南下語音.length >= 2 && /事故就在前方/.test(R.官方事件.南下語音.at(-1)));
+  ok('播報說得出是官方通報', R.官方事件.南下語音.some(t => /官方通報/.test(t)));
+  ok('對向車道的官方事件不報', R.官方事件.北上語音.length === 0);
   ok('沒有頁面錯誤', R.新使用者.errors.length === 0 && R.舊使用者.errors.length === 0);
 
   await browser.close();

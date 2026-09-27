@@ -250,6 +250,95 @@ console.log('\n── 排程對帳（沒設 TDX 金鑰時要安全略過）─�
   t('未設金鑰時明確略過而不是爆炸', r.status === 200 && !!r.body.skipped, r.body);
 }
 
+console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回應節錄）──');
+{
+  const FX = JSON.parse((await import('node:fs')).readFileSync(new URL('./fixtures/tdx_live_events.json', import.meta.url), 'utf8'));
+  const realFetch = globalThis.fetch;
+  let fail503 = false;
+  globalThis.fetch = async (u, opt) => {
+    u = String(u);
+    if (u.includes('/token')) return new Response(JSON.stringify({ access_token: 'tk' }), { status: 200 });
+    if (fail503 && u.includes('Highway')) return new Response('{}', { status: 503 });
+    if (u.includes('LiveEvent/Freeway')) return new Response(JSON.stringify(FX.Freeway), { status: 200 });
+    if (u.includes('LiveEvent/Highway')) return new Response(JSON.stringify(FX.Highway), { status: 200 });
+    return realFetch(u, opt);
+  };
+  const env2 = { HAZARDS: makeKV(), TDX_ID: 'id', TDX_SECRET: 'sec' };
+  const call2 = async (method, path, body) => {
+    const res = await worker.fetch(new Request(BASE + path, { method,
+      headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined }), env2);
+    return { status: res.status, body: await res.json() };
+  };
+
+  const r = await call2('POST', '/reconcile');
+  t('有金鑰時會抓官方事件', r.status === 200 && r.body.officialCount > 0, r.body);
+  const stored = await env2.HAZARDS.get('official', 'json');
+  t('「機動開放路肩」不列入（無影響、數量多，唸了只是噪音）',
+    stored && !stored.items.some(x => /路肩/.test(x.note)), stored && stored.items.map(x => x.note));
+  t('座標從 WKT POINT 解析（經度在前）', stored.items.every(x => x.lat > 21 && x.lat < 26 && x.lon > 119 && x.lon < 123));
+
+  // 國道三號南向 410.1K 交通事故（屏東）
+  const acc = stored.items.find(x => x.type === '事故');
+  t('交通事故對應成「事故」', !!acc, stored.items.map(x => x.type));
+  t('里程 410K+100 → 410.1', acc && acc.km === 410.1, acc);
+  t('國道歸類為國道', acc && acc.roadClass === '國道');
+
+  const q = await call2('GET', `/hazards?lat=${acc.lat - 2000 / 111320}&lon=${acc.lon}&r=15000`);
+  const oa = q.body.hazards.find(h => h.id === acc.id);
+  t('查附近時會附上官方事件', !!oa && q.body.official >= 1, q.body);
+  t('官方事件標記為 official', oa && oa.official === 'open' && oa.src === 'official');
+  t('南向 → 方位角 180', oa && oa.brg === 180);
+  t('方向容許角放寬（彎道不漏報）', oa && oa.brgTol === 110);
+  t('官方事件 id 符合路由格式', oa && /^[A-Za-z0-9-]{4,40}$/.test(oa.id));
+
+  const hw = stored.items.find(x => x.road === '台72');
+  t('省道施工也有', hw && hw.type === '施工' && hw.dir === '雙向');
+  const qh = await call2('GET', `/hazards?lat=${hw.lat}&lon=${hw.lon}&r=3000`);
+  t('雙向 → 不帶方位角（兩個方向都要報）', qh.body.hazards.find(h => h.id === hw.id)?.brg === null);
+
+  // 使用者在同一地點回報了事故 → 官方那筆不重複給
+  const rep = await call2('POST', '/report', { lat: acc.lat, lon: acc.lon, type: '事故', roadClass: '國道', brg: 180, device: 'dev-o1' });
+  const q2 = await call2('GET', `/hazards?lat=${acc.lat}&lon=${acc.lon}&r=3000`);
+  t('使用者回報在旁邊時不重複給官方那筆', q2.body.hazards.filter(h => h.type === '事故').length === 1, q2.body.hazards);
+
+  // 對帳：官方仍在 → 使用者回報標記 officialOpen
+  await call2('POST', '/reconcile');
+  const q3 = await call2('GET', `/hazards?lat=${acc.lat}&lon=${acc.lon}&r=3000`);
+  const mine = q3.body.hazards.find(h => h.id === rep.body.hazard.id);
+  t('官方仍在進行 → 使用者回報標記為官方確認', mine && mine.official === 'open', mine);
+
+  // 官方清單上消失 = 已排除 → 使用者回報自動關掉
+  const saved = FX.Freeway.LiveEvents;
+  FX.Freeway.LiveEvents = saved.filter(e => e.EventType !== 1);
+  const r4 = await call2('POST', '/reconcile');
+  const q4 = await call2('GET', `/hazards?lat=${acc.lat}&lon=${acc.lon}&r=3000`);
+  t('官方排除後，對應的使用者回報自動關掉', r4.body.autoClosed === 1 && !q4.body.hazards.some(h => h.type === '事故'), r4.body);
+  FX.Freeway.LiveEvents = saved;
+
+  // 其中一個來源失敗 → 整批作廢，不能拿半份清單去關別人的回報
+  const before = await env2.HAZARDS.get('official', 'json');
+  fail503 = true;
+  const r5 = await call2('POST', '/reconcile');
+  const after = await env2.HAZARDS.get('official', 'json');
+  t('來源失敗時略過，不覆蓋上一份清單', !!r5.body.skipped && after.t === before.t, r5.body);
+  fail503 = false;
+
+  // 排程停擺太久 → 不再提供舊清單
+  await env2.HAZARDS.put('official', JSON.stringify({ ...after, t: Date.now() - 31 * 60e3 }));
+  const q6 = await call2('GET', `/hazards?lat=${acc.lat}&lon=${acc.lon}&r=3000`);
+  t('官方清單超過 30 分鐘沒更新就不提供', q6.body.official === 0, q6.body);
+
+  // 憑證要快取：多次排程只申請一次（TDX 憑證服務有頻率限制，每次都申請會吃 429）
+  let tokenCalls = 0;
+  const wrapped = globalThis.fetch;
+  globalThis.fetch = async (u, o) => { if (String(u).includes('/token')) tokenCalls++; return wrapped(u, o); };
+  await env2.HAZARDS.delete('tdx:token');
+  await call2('POST', '/reconcile'); await call2('POST', '/reconcile'); await call2('POST', '/reconcile');
+  t('TDX 憑證快取：三次排程只申請一次', tokenCalls === 1, tokenCalls);
+
+  globalThis.fetch = realFetch;
+}
+
 console.log('\n── 沒綁 KV 時要講清楚 ──');
 {
   const res = await worker.fetch(new Request(BASE + '/hazards?lat=25&lon=121'), {});

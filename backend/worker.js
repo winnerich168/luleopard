@@ -203,7 +203,9 @@ async function handleQuery(env, url) {
     .slice(0, 200)
     .map(x => ({ ...publicShape(x.h), dist: Math.round(x.d) }));
 
-  return json({ ok: true, now, count: near.length, hazards: near });
+  const off = await officialNear(env, lat, lon, r, near, now);
+  const merged = near.concat(off).sort((a, b) => a.dist - b.dist).slice(0, 200);
+  return json({ ok: true, now, count: merged.length, official: off.length, hazards: merged });
 }
 
 async function handleReport(env, req) {
@@ -379,65 +381,154 @@ const OFFICIAL_MATCH_M = 500;
 function officialType(text) {
   const t = String(text || '');
   if (/事故|碰撞|翻覆|追撞/.test(t)) return '事故';
-  if (/施工|養護|封閉|管制/.test(t)) return '施工';
   if (/拋錨|故障/.test(t)) return '車輛故障';
   if (/障礙物|散落|掉落/.test(t)) return '掉落物';
+  if (/落石|坍方|土石|淹水|積水|災害/.test(t)) return '道路災害';
+  if (/施工|養護|維修|工程/.test(t)) return '施工';
+  if (/封閉|封路|管制/.test(t)) return '道路管制';
   if (/壅塞|回堵/.test(t)) return '塞車';
   return null;
 }
 
+/* TDX 道路即時事件（RoadEvent/LiveEvent）。實測（2026-09）有座標的是這一系列：
+   國道（高公局）＋ 省道／快速道路（公路局）。縣市也有，但 22 個縣市要打 22 次，先不抓。 */
+const TDX_EVENT_URLS = [
+  'https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Freeway?%24format=JSON',
+  'https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Highway?%24format=JSON',
+];
+const OFFICIAL_KEY = 'official';           // 整份官方事件清單存成一個 KV key
+const OFFICIAL_STALE_MS = 30 * 60e3;       // 排程停擺超過 30 分鐘就不再提供，寧缺勿錯
+const OFFICIAL_DEDUPE_M = 300;             // 使用者回報已經在附近就不重複給官方那筆
+
+/** "POINT(121.01 24.85)" / "POINT (121.01 24.85)" → {lat, lon} */
+function wktPoint(s) {
+  const m = String(s || '').match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+  return m ? { lon: parseFloat(m[1]), lat: parseFloat(m[2]) } : null;
+}
+/** "87K+290" → 87.29 */
+function kmOf(s) {
+  const m = String(s || '').match(/(\d+)\s*K\s*\+?\s*(\d+)?/i);
+  return m ? Math.round((parseInt(m[1], 10) + (m[2] ? parseInt(m[2], 10) / 1000 : 0)) * 10) / 10 : null;
+}
+function roadClassOf(road, freeway) {
+  if (freeway || /^國道/.test(road)) return '國道';
+  if (/^台6[1-8]|快速|高架/.test(road)) return '高架/快速道路';
+  return '一般道路';
+}
+/** 很短的穩定雜湊，當作官方事件的 id（要符合 /hazards/:id 的格式） */
+function shortHash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+
 /**
- * 從 TDX 取即時事件。
- * ⚠️ 端點路徑請對照 TDX Swagger 確認 —— 這裡用環境變數帶入，方便日後調整
- *    而不用改程式碼：wrangler secret put TDX_ID / TDX_SECRET，
- *    以及 vars 裡的 TDX_INCIDENT_URL。
+ * TDX 一筆 LiveEvent → 我們的格式。不值得播報的回傳 null。
+ * 國道的「特殊管制事件-機動開放路肩」一次就有三十幾筆、而且標明「無影響」，
+ * 全部唸出來只會讓人把語音關掉。
  */
-async function fetchOfficial(env) {
-  if (!env.TDX_ID || !env.TDX_SECRET || !env.TDX_INCIDENT_URL) return null;
-  const tk = await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token', {
+function officialFromTdx(o, freeway) {
+  const pos = wktPoint(o.Positions);
+  if (!pos || !isFinite(pos.lat) || !isFinite(pos.lon)) return null;
+  const text = (o.EventTitle || '') + ' ' + (o.Description || '');
+  if (/路肩/.test(text) && /開放/.test(text)) return null;
+  if (o.Impact && o.Impact.Description === '無影響' && o.EventType === 4) return null;
+  const type = officialType(text);
+  if (!type) return null;
+  const L = (o.Location && o.Location.FreeExpressHighway) || {};
+  const road = clean(L.Road || '', 20);
+  return {
+    id: 'o-' + shortHash(String(o.EventID || text)),
+    lat: pos.lat, lon: pos.lon, type,
+    road, roadClass: roadClassOf(road, freeway),
+    dir: clean(L.Direction || '', 10),
+    km: kmOf(L.StartKM),
+    note: clean(o.Description || o.EventTitle || '', 120),
+    since: Date.parse(o.EffectiveTime || o.PublishTime || '') || null,
+  };
+}
+
+/**
+ * 從 TDX 取即時事件。回傳 null = 沒設金鑰或整個失敗（不要拿空清單去關掉別人的回報）。
+ * 網址可用 TDX_INCIDENT_URL 覆寫（多個用逗號分隔），沒設就用上面實測過的兩個。
+ */
+/**
+ * TDX 存取憑證。一次有效 24 小時，存在 KV 重複使用，快過期（剩不到 1 小時）才換新。
+ * 以前每 10 分鐘的排程都重新申請一次，一天 144 次 —— 憑證服務有頻率限制，
+ * 實際部署後馬上就吃到 429，整個官方事件功能等於沒作用。
+ */
+const TDX_TOKEN_KEY = 'tdx:token';
+async function tdxToken(env, force) {
+  const now = Date.now();
+  if (!force) {
+    const c = await env.HAZARDS.get(TDX_TOKEN_KEY, 'json');
+    if (c && c.tk && c.exp - now > 3600e3) return c.tk;
+  }
+  const r = await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'client_credentials',
                                 client_id: env.TDX_ID, client_secret: env.TDX_SECRET }),
-  }).then(r => r.ok ? r.json() : null);
-  if (!tk || !tk.access_token) return null;
-
-  const r = await fetch(env.TDX_INCIDENT_URL, {
-    headers: { authorization: 'Bearer ' + tk.access_token, accept: 'application/json' },
   });
-  if (!r.ok) return null;
+  if (!r.ok) { officialErr = 'token HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120); return null; }
   const j = await r.json();
-  const arr = Array.isArray(j) ? j : (j.Incidents || j.Newses || j.LiveTraffics || j.data || []);
-  const now = Date.now();
-  return arr.map(o => {
-    const lat = parseFloat(o.PositionLat ?? o.Latitude ?? o.Lat);
-    const lon = parseFloat(o.PositionLon ?? o.Longitude ?? o.Lon);
-    const end = o.EndTime || o.ExpectEndTime || o.ModifiedTime;
-    return {
-      lat, lon,
-      type: officialType((o.Description || '') + (o.Title || '') + (o.IncidentType || '')),
-      dir: o.Direction || o.RoadDirection || '',
-      endMs: end ? Date.parse(end) : null,
-      ended: end ? (Date.parse(end) < now) : false,
-    };
-  }).filter(x => isFinite(x.lat) && isFinite(x.lon) && x.type);
+  if (!j.access_token) { officialErr = 'token 沒有 access_token'; return null; }
+  const exp = now + (j.expires_in || 86400) * 1000;
+  await env.HAZARDS.put(TDX_TOKEN_KEY, JSON.stringify({ tk: j.access_token, exp }),
+    { expirationTtl: Math.max(60, Math.floor((exp - now) / 1000)) });
+  return j.access_token;
+}
+
+let officialErr = '';                      // 最近一次失敗的原因，/reconcile 會回報，方便查問題
+async function fetchOfficial(env) {
+  officialErr = '';
+  if (!env.TDX_ID || !env.TDX_SECRET) { officialErr = '未設定 TDX_ID / TDX_SECRET'; return null; }
+  let tk = await tdxToken(env);
+  if (!tk) return null;
+
+  const urls = env.TDX_INCIDENT_URL
+    ? env.TDX_INCIDENT_URL.split(/[,\s]+/).filter(Boolean) : TDX_EVENT_URLS;
+  const out = [];
+  let okCount = 0;
+  for (const u of urls) {
+    let r = await fetch(u, { headers: { authorization: 'Bearer ' + tk, accept: 'application/json' } });
+    if (r.status === 401) {                // 快取的憑證被撤銷（例如換了金鑰）→ 強制換新重試一次
+      tk = await tdxToken(env, true);
+      if (!tk) return null;
+      r = await fetch(u, { headers: { authorization: 'Bearer ' + tk, accept: 'application/json' } });
+    }
+    if (!r.ok) { officialErr += (officialErr ? '；' : '') + u.split('?')[0].split('/').pop() + ' HTTP ' + r.status; continue; }
+    const j = await r.json();
+    const arr = Array.isArray(j) ? j : (j.LiveEvents || j.Incidents || j.Newses || []);
+    const freeway = /Freeway/i.test(u);
+    arr.forEach(o => { const x = officialFromTdx(o, freeway); if (x) out.push(x); });
+    okCount++;
+  }
+  // 任何一個來源失敗就整批作廢：少了半份清單，會把那半邊還在進行的事件誤判成「已結束」
+  if (okCount !== urls.length) return null;
+  return out;
 }
 
 /** 官方事件的方向字串 → 方位角，用來排除對向 */
 function dirToBrg(s) {
   const t = String(s || '');
-  if (/南下|北往南/.test(t)) return 180;
-  if (/北上|南往北/.test(t)) return 0;
-  if (/東行|西往東/.test(t)) return 90;
-  if (/西行|東往西/.test(t)) return 270;
+  if (/雙向/.test(t)) return null;
+  if (/南下|南向|北往南/.test(t)) return 180;
+  if (/北上|北向|南往北/.test(t)) return 0;
+  if (/東行|東向|西往東/.test(t)) return 90;
+  if (/西行|西向|東往西/.test(t)) return 270;
   return null;
 }
 
 async function reconcile(env) {
   const official = await fetchOfficial(env);
-  if (!official) return { skipped: '未設定 TDX 金鑰或取得失敗' };
+  if (!official) return { skipped: '未設定 TDX 金鑰或取得失敗', reason: officialErr };
 
   const now = Date.now();
+  // 整份清單存一個 key：查詢時只要多讀一次，不用為官方事件另建網格索引
+  await env.HAZARDS.put(OFFICIAL_KEY, JSON.stringify({ t: now, items: official }),
+    { expirationTtl: 2 * 3600 });
+
   const res = await env.HAZARDS.list({ prefix: 'h:', limit: 1000 });
   let opened = 0, closed = 0, checked = 0;
 
@@ -454,23 +545,54 @@ async function reconcile(env) {
       if (ob != null && h.brg != null && angDiff(ob, h.brg) > 90) continue;
       if (!best || d < best.d) best = { o, d };
     }
-    if (!best) continue;
 
-    if (best.o.ended) {
-      // 官方說結束了 → 直接關掉，不必等衰減
-      await env.HAZARDS.delete(k.name);
-      closed++;
-    } else {
+    if (!best) {
+      /* 即時清單只列「進行中」的事件，沒有結束時間欄位。
+         之前對上過官方、這次清單裡卻沒有了 = 官方已經排除 → 直接關掉，不必等衰減。
+         從來沒對上過的（官方沒收錄）就不動，交給時間衰減與車流探針。 */
+      if (h.officialOpen) { await env.HAZARDS.delete(k.name); closed++; }
+      continue;
+    }
+    if (!h.officialOpen) {                 // 狀態有變才寫，省 KV 寫入額度
       h.officialOpen = true;
       h.officialCleared = false;
-      // 官方有預計結束時間就照它設定到期
-      if (best.o.endMs && best.o.endMs > now) h.expires = Math.min(now + MAX_TTL, best.o.endMs + 5 * 60e3);
       await env.HAZARDS.put(k.name, JSON.stringify(h),
         { expirationTtl: Math.max(60, Math.ceil((h.expires - now) / 1000) + 300) });
-      opened++;
     }
+    opened++;
   }
   return { checked, matchedOpen: opened, autoClosed: closed, officialCount: official.length };
+}
+
+/**
+ * 查詢時一併附上附近的官方進行中事件。
+ * 使用者回報已經在附近（同類、300 公尺內）就不重複給；排程停擺太久就不給，寧缺勿錯。
+ */
+async function officialNear(env, lat, lon, r, userHazards, now) {
+  const o = await env.HAZARDS.get(OFFICIAL_KEY, 'json');
+  if (!o || !Array.isArray(o.items) || now - o.t > OFFICIAL_STALE_MS) return [];
+  const out = [];
+  for (const x of o.items) {
+    const d = distM(lat, lon, x.lat, x.lon);
+    if (d > r) continue;
+    if (userHazards.some(u => u.type === x.type && distM(u.lat, u.lon, x.lat, x.lon) <= OFFICIAL_DEDUPE_M)) continue;
+    out.push({
+      id: x.id, type: x.type, lat: x.lat, lon: x.lon,
+      road: x.road, roadClass: x.roadClass, dir: x.dir, km: x.km,
+      brg: dirToBrg(x.dir),
+      // 官方方向是整條路的名目方向（南向＝180°），彎道處實際行進方向可能差很多，
+      // 容許角度放寬到 110°：彎道不漏報，對向（差 180°）仍然排除
+      brgTol: 110,
+      note: x.note, lane: '',
+      // 時間用「這次提供的時間」：它在官方清單上就是進行中，不該在客戶端自己衰減掉
+      t: now, lastReport: now, expires: now + 20 * 60e3,
+      confirms: 0, clears: 0, reports: 1, score: 1.5,
+      probes: { clear: 0, still: 0 },
+      official: 'open', src: 'official',
+      dist: Math.round(d),
+    });
+  }
+  return out;
 }
 
 export default {

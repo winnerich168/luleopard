@@ -2,6 +2,10 @@
 
 **正式環境：** `https://luleopard-hazards.winnerich.workers.dev`（App 已預設連線，不用手動填）
 
+**已設定的 secrets：** `TDX_ID`、`TDX_SECRET`（TDX 金鑰）、`ADMIN_TOKEN`（保護 `/reconcile`）。
+換 TDX 金鑰：`npx wrangler secret put TDX_ID` / `TDX_SECRET`，或 Cloudflare 後台 → Workers → luleopard-hazards → Settings → Variables and Secrets。
+官方事件來源預設是 TDX `RoadEvent/LiveEvent/Freeway` 與 `/Highway`，可用 `TDX_INCIDENT_URL`（逗號分隔）覆寫。
+
 一支 Cloudflare Worker + 一個 KV namespace。**免費方案就夠跑**，不用信用卡、不用管伺服器。
 
 沒有這支後端，回報只會留在自己手機裡 —— 對別人完全沒有預警作用，也就失去意義。

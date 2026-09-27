@@ -1,0 +1,245 @@
+{
+ "_comment": "TDX RoadEvent/LiveEvent 實際回應節錄（2026-09-27），給 test_worker.mjs 用",
+ "Freeway": {
+  "LiveEvents": [
+   {
+    "EventID": "A15040300H-01-20260927225753638400020",
+    "EventTitle": "交通事故",
+    "Description": "國道三號 南向 410K+100 交通事故-事故",
+    "EventType": 1,
+    "EventSubType": 102,
+    "EventStep": 1,
+    "EffectiveTime": "2026-09-27T22:57:00+08:00",
+    "Positions": "POINT(120.532435 22.621562)",
+    "LocationType": 0,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "國道三號",
+      "Direction": "南向",
+      "StartKM": "410K+100",
+      "EndKM": "410K+100",
+      "SectionStart": "麟洛",
+      "SectionEnd": "竹田系統"
+     }
+    },
+    "Impact": {
+     "Description": "部分阻斷交通",
+     "Severity": 1,
+     "Regulations": [
+      2
+     ],
+     "BlockWay": 1,
+     "BlockedLanes": "1"
+    },
+    "Source": "高公局南區交控中心",
+    "PublishTime": "2026-09-27T22:57:00+08:00",
+    "LastUpdateTime": "2026-09-27T22:57:00+08:00"
+   },
+   {
+    "EventID": "A15040100H-01-20260927054812079100033",
+    "EventTitle": "特殊管制事件",
+    "Description": "國道一號 南向 87K+290 特殊管制事件-機動開放路肩事件",
+    "EventType": 4,
+    "EventSubType": 498,
+    "EventStep": 1,
+    "EffectiveTime": "2026-09-27T05:48:00+08:00",
+    "Positions": "POINT(121.012520 24.853814)",
+    "LocationType": 0,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "國道一號",
+      "Direction": "南向",
+      "StartKM": "87K+290",
+      "EndKM": "90K+900",
+      "SectionStart": "湖口服務區",
+      "SectionEnd": "竹北"
+     }
+    },
+    "Impact": {
+     "Description": "無影響",
+     "Severity": 0,
+     "Regulations": [
+      0
+     ],
+     "BlockWay": 0,
+     "BlockedLanes": "-1"
+    },
+    "Source": "設備監測2",
+    "PublishTime": "2026-09-27T05:48:00+08:00",
+    "LastUpdateTime": "2026-09-27T05:48:00+08:00"
+   },
+   {
+    "EventID": "A15040100H-01-20260927054816252100033",
+    "EventTitle": "特殊管制事件",
+    "Description": "國道一號 南向 84K+500 特殊管制事件-機動開放路肩事件",
+    "EventType": 4,
+    "EventSubType": 498,
+    "EventStep": 1,
+    "EffectiveTime": "2026-09-27T05:48:00+08:00",
+    "Positions": "POINT(121.022455 24.873403)",
+    "LocationType": 0,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "國道一號",
+      "Direction": "南向",
+      "StartKM": "84K+500",
+      "EndKM": "86K+200",
+      "SectionStart": "湖口",
+      "SectionEnd": "湖口服務區"
+     }
+    },
+    "Impact": {
+     "Description": "無影響",
+     "Severity": 0,
+     "Regulations": [
+      0
+     ],
+     "BlockWay": 0,
+     "BlockedLanes": "-1"
+    },
+    "Source": "設備監測2",
+    "PublishTime": "2026-09-27T05:48:00+08:00",
+    "LastUpdateTime": "2026-09-27T05:48:00+08:00"
+   },
+   {
+    "EventID": "A15040200H-01-20260709082440849300021",
+    "EventTitle": "施工事件",
+    "Description": "國道三號 南向 191K+600 施工事件-施工維護",
+    "EventType": 2,
+    "EventSubType": 298,
+    "EventStep": 1,
+    "EffectiveTime": "2026-07-09T08:24:00+08:00",
+    "Positions": "POINT(120.520286 24.140772)",
+    "LocationType": 2,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "國道三號",
+      "Direction": "南向",
+      "StartKM": "191K+600",
+      "EndKM": "191K+600",
+      "Interchange": "和美",
+      "Ramp": {
+       "Direction": "南向",
+       "EntryExit": "出口"
+      }
+     }
+    },
+    "Impact": {
+     "Description": "未知",
+     "Severity": 255,
+     "Regulations": [
+      255
+     ],
+     "BlockWay": 255,
+     "BlockedLanes": "255"
+    },
+    "Source": "高公局中區交控中心",
+    "PublishTime": "2026-07-09T08:24:00+08:00",
+    "LastUpdateTime": "2026-07-09T08:24:00+08:00"
+   },
+   {
+    "EventID": "A15040100H-01-20260927152122003100001",
+    "EventTitle": "壅塞事件",
+    "Description": "國道三號 北向 100K+180 壅塞事件-壅塞",
+    "EventType": 3,
+    "EventSubType": 303,
+    "EventStep": 89,
+    "EffectiveTime": "2026-09-27T15:21:22+08:00",
+    "Positions": "POINT(120.992939 24.755516)",
+    "LocationType": 0,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "國道三號",
+      "Direction": "北向",
+      "StartKM": "100K+180",
+      "EndKM": "98K+800",
+      "SectionStart": "新竹系統",
+      "SectionEnd": "寶山休息站"
+     }
+    },
+    "Impact": {
+     "Description": "無影響",
+     "Severity": 0,
+     "Regulations": [
+      0
+     ],
+     "BlockWay": 0,
+     "BlockedLanes": "-1"
+    },
+    "Source": "高公局北區交控中心",
+    "PublishTime": "2026-09-27T15:21:22+08:00",
+    "LastUpdateTime": "2026-09-27T23:03:22+08:00"
+   }
+  ]
+ },
+ "Highway": {
+  "LiveEvents": [
+   {
+    "EventID": "A15030000H_001-01-11509270119",
+    "EventTitle": "施工",
+    "Description": "台72線雙向2K+410至31K+042後龍至獅潭路段，自115年9月28日當日7時起至11時30分止，於內外車道進行道路巡查及坑洞緊急修補作業，採移動性施工，請注意路況並小心駕駛。",
+    "EventType": 2,
+    "EventSubType": 208,
+    "EventStep": 2,
+    "EffectiveTime": "2026-09-27T15:39:00+08:00",
+    "Positions": "POINT (120.791713455128 24.6109881196663)",
+    "LocationType": 0,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "台72",
+      "Direction": "雙向",
+      "StartKM": "2K+400",
+      "EndKM": "2K+400"
+     }
+    },
+    "Source": "警廣",
+    "PublishTime": "2026-09-27T15:45:27+08:00",
+    "LastUpdateTime": "2026-09-27T23:05:02+08:00"
+   },
+   {
+    "EventID": "A15030000H_001-01-11509240212",
+    "EventTitle": "施工",
+    "Description": "台65線雙向0.2K(五股匝道)、1.6K(新莊一匝道)辦理道路伸縮縫及排水管線修復,於9/29(二)至9/30(三)每日22時至翌日6時止,期間封閉北向1.6K(新莊一匝道)、南向0.2K(五股匝道)及1.6K(新莊一匝道)",
+    "EventType": 2,
+    "EventSubType": 206,
+    "EventStep": 2,
+    "EffectiveTime": "2026-09-24T16:23:00+08:00",
+    "Positions": "POINT (121.442301755281 25.0581526005918)",
+    "LocationType": 0,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "台65",
+      "Direction": "雙向",
+      "StartKM": "0K+200",
+      "EndKM": "0K+200"
+     }
+    },
+    "Source": "警廣",
+    "PublishTime": "2026-09-24T16:25:24+08:00",
+    "LastUpdateTime": "2026-09-27T23:05:02+08:00"
+   },
+   {
+    "EventID": "A15030000H_001-01-11507270308",
+    "EventTitle": "災害",
+    "Description": "1.台7線49K~50K大曼路段（台7線49.8K災後復建工程）: (1).每日上午8點至下午6時整點放行管制。每整點放行10分鐘，另中午12時至下午1時放行1小時。 (2).考量夜間視線昏暗不明·邊坡落石狀況難以辨識，每日下午6時~翌日上午8時，台7線大曼路段49K-50K夜間預警性封閉，除警消公務救難等特殊需求外，禁止人車通行。 (3).如遇天候狀況不佳(強降雨、濃霧無法監看邊坡等)或地震過後、現場持續落石有擴大之虞，搶修團隊將視邊坡狀況機動管制，且仍不排除立即封閉道路，禁止人車通行。 2.台7線47K~61K路段（巴陵至西村）：該路段如遇天候狀況不佳(強降雨等)達一級監控路段管制行動值或地震過後，將依相關規定進行管制與視情形不定時管制通行。",
+    "EventType": 6,
+    "EventSubType": 601,
+    "EventStep": 2,
+    "EffectiveTime": "2026-07-27T17:37:00+08:00",
+    "Positions": "POINT (121.444930172531 24.6426419918412)",
+    "LocationType": 0,
+    "Location": {
+     "FreeExpressHighway": {
+      "Road": "台7",
+      "Direction": "雙向",
+      "StartKM": "49K+000",
+      "EndKM": "49K+000"
+     }
+    },
+    "Source": "警廣",
+    "PublishTime": "2026-07-27T17:50:27+08:00",
+    "LastUpdateTime": "2026-09-27T23:05:02+08:00"
+   }
+  ]
+ }
+}
