@@ -707,16 +707,22 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20260927.2209';
+const APP_BUILD='20260927.2247';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
    interchanges.min.json 由 etl/build_interchanges.py 從 OSM 產生。 */
 const DATA_BASE='https://winnerich168.github.io/luleopard/data/';
+/* 共享回報後端（backend/worker.js，Cloudflare Worker）。
+   沒有它，回報只留在自己手機裡，對別人完全沒有預警作用。
+   用 file:// 直接開檔（本機開發、自動測試）時不預設連線 —— 不然跑一次測試
+   就會把假回報、假探針灌進正式資料庫，讓真的用路人收到不存在的事故。 */
+const HAZ_API=(location.protocol==='file:'&&!window.Capacitor)? ''
+            : 'https://luleopard-hazards.winnerich.workers.dev';
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
            t0:1000,t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:DATA_BASE+'speedcams.min.json',feedAuto:true,feedLast:0,feedCount:0,
-           hazUrl:'',hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:DATA_BASE+'interchanges.min.json',icLast:0,
+           hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:DATA_BASE+'interchanges.min.json',icLast:0,
            powerSave:true,powerAfterMin:5,
            roadUrl:'',roadCount:0,
            tdxId:'',tdxSecret:'',
@@ -731,6 +737,11 @@ if(!CFG.autoData1){
   if(!CFG.feedUrl){ CFG.feedUrl=DEF.feedUrl; CFG.feedAuto=true; }
   if(!CFG.icUrl) CFG.icUrl=DEF.icUrl;
   CFG.autoData1=1; saveCfg();
+}
+/* 後端是之後才部署的，已經搬遷過的人也要補一次（同樣只補空白的） */
+if(!CFG.autoData2){
+  if(!CFG.hazUrl) CFG.hazUrl=DEF.hazUrl;
+  CFG.autoData2=1; saveCfg();
 }
 
 /* ---------- 2. 內建示範點位 ---------- */

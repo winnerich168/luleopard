@@ -1,5 +1,7 @@
 # 鹿豹 · 路況回報後端
 
+**正式環境：** `https://luleopard-hazards.winnerich.workers.dev`（App 已預設連線，不用手動填）
+
 一支 Cloudflare Worker + 一個 KV namespace。**免費方案就夠跑**，不用信用卡、不用管伺服器。
 
 沒有這支後端，回報只會留在自己手機裡 —— 對別人完全沒有預警作用，也就失去意義。

@@ -59,7 +59,7 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
     const { page, errs, hits } = await open(browser);
     R.新使用者 = await page.evaluate(() => ({
       點數: LP.CAMS().length, 交流道: LP.IC.items.length, 已載入: LP.IC.loaded,
-      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl,
+      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl, hazUrl: LP.CFG.hazUrl,
       交流道狀態: document.getElementById('icStat').textContent }));
     R.新使用者.請求 = hits; R.新使用者.errors = errs;
 
@@ -86,7 +86,7 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
     const { page, errs } = await open(browser, { legacyCfg: { feedUrl: '', feedAuto: false, icUrl: '', voice: true } });
     R.舊使用者 = await page.evaluate(() => ({
       點數: LP.CAMS().length, 交流道: LP.IC.items.length,
-      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl }));
+      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl, hazUrl: LP.CFG.hazUrl }));
     R.舊使用者.errors = errs;
     await page.context().close();
   }
@@ -102,7 +102,7 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
   /* 4. file:// 開檔（本機開發、其他測試）不自動連網 */
   {
     const { page, hits } = await open(browser, { fileUrl: true });
-    R.本機開檔 = { 請求: hits };
+    R.本機開檔 = { 請求: hits, hazUrl: await page.evaluate(() => LP.CFG.hazUrl) };
     await page.context().close();
   }
 
@@ -117,6 +117,11 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
   ok('舊使用者也自動補上資料源', R.舊使用者.點數 > 1500 && R.舊使用者.交流道 > 400 && R.舊使用者.feedAuto === true);
   ok('自己清掉的不再自動抓', R.自己關掉.交流道 === 0 && R.自己關掉.請求.length === 0);
   ok('file:// 不自動連網', R.本機開檔.請求.length === 0);
+  // 共享回報後端：網站上預設連線；file:// 絕不預設，否則跑測試會把假回報灌進正式資料庫
+  const API = 'https://luleopard-hazards.winnerich.workers.dev';
+  ok('預設連上共享回報後端', R.新使用者.hazUrl === API);
+  ok('舊使用者也補上後端', R.舊使用者.hazUrl === API);
+  ok('file:// 不預設後端', R.本機開檔.hazUrl === '');
   ok('沒有頁面錯誤', R.新使用者.errors.length === 0 && R.舊使用者.errors.length === 0);
 
   await browser.close();
