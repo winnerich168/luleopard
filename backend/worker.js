@@ -18,8 +18,9 @@
  *   3. 官方事件（1968/TDX）說結束 → 直接歸零
  *   4. 分數低於門檻就不再回傳，等於自動下架
  *
- * 空間索引：用 0.05°（約 5.5 公里）的網格當 KV key 前綴，查詢時掃 3x3 或 5x5 格。
- * 沒有資料庫、沒有 PostGIS，KV 就夠了。
+ * 儲存：Cloudflare D1（SQLite）。查附近用經緯度方框 + 索引，一次查詢一個 SQL。
+ * 以前用 KV 的網格前綴，一次查詢要 list 約 81 格；KV 免費方案一天只有 1000 次 list
+ * 與 1000 次寫入，上線一天就會爆。資料表見 schema.sql。
  *
  * 隱私：不存照片、不存帳號。只留一個匿名裝置代號（客戶端產生的隨機字串的雜湊），
  * 用途僅限於防止同一支手機灌爆同一個地點。
@@ -60,7 +61,6 @@ const PROBE_CLEAR = 0.72;
 const PROBE_STILL = 1.18;
 const PROBE_MAX = 40;              // 只保留最近這麼多筆探針
 
-const CELL = 0.05;                 // 網格大小（度）≈ 5.5 公里
 const MAX_RADIUS = 30000;          // 查詢半徑上限（公尺）
 const CLEAR_THRESHOLD = 2;         // 幾個人說清掉了就隱藏
 const POST_COOLDOWN_MS = 20e3;     // 同一裝置連續回報的最短間隔
@@ -79,7 +79,6 @@ const json = (obj, status = 200) =>
     headers: { 'content-type': 'application/json; charset=utf-8', ...CORS },
   });
 
-const cellOf = (lat, lon) => `${Math.floor(lat / CELL)}_${Math.floor(lon / CELL)}`;
 
 function distM(a, b, c, d) {
   const R = 6371000, r = Math.PI / 180;
@@ -154,37 +153,55 @@ function publicShape(h) {
   };
 }
 
-async function listCells(env, lat, lon, radius) {
-  const span = Math.ceil(radius / (CELL * 111320)) + 1;   // 需要掃幾圈網格
-  const rings = Math.min(span, 6);
-  const keys = [];
-  for (let dx = -rings; dx <= rings; dx++) {
-    for (let dy = -rings; dy <= rings; dy++) {
-      keys.push(`h:${cellOf(lat + dx * CELL, lon + dy * CELL)}:`);
-    }
-  }
-  const seen = new Set(), out = [];
-  for (const prefix of keys) {
-    const res = await env.HAZARDS.list({ prefix, limit: 200 });
-    for (const k of res.keys) {
-      if (seen.has(k.name)) continue;
-      seen.add(k.name);
-      out.push(k.name);
-    }
-  }
-  return out;
-}
-
-async function getMany(env, keys) {
-  const out = [];
-  // KV 沒有批次讀，分批併發避免一次開太多連線
-  for (let i = 0; i < keys.length; i += 20) {
-    const chunk = keys.slice(i, i + 20);
-    const vals = await Promise.all(chunk.map(k => env.HAZARDS.get(k, 'json')));
-    vals.forEach(v => { if (v) out.push(v); });
-  }
-  return out;
-}
+/* ── 儲存層（D1）────────────────────────────────────────────
+   所有資料存取都集中在這裡，handler 不直接碰 SQL。 */
+const Store = {
+  /** 方框內、還沒過期的事件（呼叫端再用 Haversine 精算距離） */
+  async near(env, lat, lon, radius, now) {
+    const dLat = radius / 111320;
+    const dLon = radius / (111320 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
+    const r = await env.DB.prepare(
+      'SELECT data FROM hazards WHERE lat BETWEEN ?1 AND ?2 AND lon BETWEEN ?3 AND ?4 AND expires > ?5 LIMIT 500')
+      .bind(lat - dLat, lat + dLat, lon - dLon, lon + dLon, now).all();
+    return (r.results || []).map(x => JSON.parse(x.data));
+  },
+  async get(env, id) {
+    const r = await env.DB.prepare('SELECT data FROM hazards WHERE id = ?1').bind(id).first();
+    return r ? JSON.parse(r.data) : null;
+  },
+  async put(env, h) {
+    await env.DB.prepare('INSERT OR REPLACE INTO hazards (id, lat, lon, expires, data) VALUES (?1, ?2, ?3, ?4, ?5)')
+      .bind(h.id, h.lat, h.lon, h.expires, JSON.stringify(h)).run();
+  },
+  async del(env, id) {
+    await env.DB.prepare('DELETE FROM hazards WHERE id = ?1').bind(id).run();
+  },
+  async alive(env, now, limit = 2000) {
+    const r = await env.DB.prepare('SELECT data FROM hazards WHERE expires > ?1 LIMIT ?2').bind(now, limit).all();
+    return (r.results || []).map(x => JSON.parse(x.data));
+  },
+  async count(env, now) {
+    const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM hazards WHERE expires > ?1').bind(now).first();
+    return r ? r.n : 0;
+  },
+  async meta(env, k) {
+    const r = await env.DB.prepare('SELECT v, exp FROM meta WHERE k = ?1').bind(k).first();
+    if (!r || (r.exp != null && r.exp < Date.now())) return null;
+    return JSON.parse(r.v);
+  },
+  async setMeta(env, k, v, ttlMs) {
+    await env.DB.prepare('INSERT OR REPLACE INTO meta (k, v, exp) VALUES (?1, ?2, ?3)')
+      .bind(k, JSON.stringify(v), ttlMs ? Date.now() + ttlMs : null).run();
+  },
+  async delMeta(env, k) {
+    await env.DB.prepare('DELETE FROM meta WHERE k = ?1').bind(k).run();
+  },
+  /** 清掉過期資料（排程順便做）。KV 會自己過期，D1 不會 */
+  async sweep(env, now) {
+    await env.DB.prepare('DELETE FROM hazards WHERE expires < ?1').bind(now - 3600e3).run();
+    await env.DB.prepare('DELETE FROM meta WHERE exp IS NOT NULL AND exp < ?1').bind(now).run();
+  },
+};
 
 async function handleQuery(env, url) {
   const lat = parseFloat(url.searchParams.get('lat'));
@@ -193,8 +210,7 @@ async function handleQuery(env, url) {
   if (!isFinite(lat) || !isFinite(lon)) return json({ error: '需要 lat 與 lon' }, 400);
 
   const now = Date.now();
-  const keys = await listCells(env, lat, lon, r);
-  const all = await getMany(env, keys);
+  const all = await Store.near(env, lat, lon, r, now);
   const near = all
     .filter(h => isAlive(h, now))
     .map(h => ({ h, d: distM(lat, lon, h.lat, h.lon) }))
@@ -223,7 +239,7 @@ async function handleReport(env, req) {
 
   // 同一裝置的冷卻，擋住手滑連按與惡意灌水
   const ckey = `c:${device}`;
-  const last = await env.HAZARDS.get(ckey);
+  const last = await Store.meta(env, ckey);
   if (last && now - Number(last) < POST_COOLDOWN_MS) {
     return json({ error: '太頻繁了，請稍候再回報', retryAfterMs: POST_COOLDOWN_MS - (now - Number(last)) }, 429);
   }
@@ -231,8 +247,7 @@ async function handleReport(env, req) {
   const brg = isFinite(parseFloat(b.brg)) ? ((parseFloat(b.brg) % 360) + 360) % 360 : null;
 
   // 附近已經有同類事件 → 併成確認，不要製造重複點
-  const keys = await listCells(env, lat, lon, NEAR_DUP_M);
-  const existing = (await getMany(env, keys)).filter(h => isAlive(h, now) && h.type === type);
+  const existing = (await Store.near(env, lat, lon, NEAR_DUP_M, now)).filter(h => isAlive(h, now) && h.type === type);
   for (const h of existing) {
     if (distM(lat, lon, h.lat, h.lon) > NEAR_DUP_M) continue;
     // 方向差太多視為對向車道的另一件事
@@ -240,9 +255,8 @@ async function handleReport(env, req) {
     h.confirms = (h.confirms || 0) + 1;
     h.lastReport = now;
     h.expires = Math.max(h.expires, now + ttlFor(type));   // 有人再次看到就延長
-    await env.HAZARDS.put(`h:${cellOf(h.lat, h.lon)}:${h.id}`, JSON.stringify(h),
-      { expirationTtl: Math.ceil((h.expires - now) / 1000) + 300 });
-    await env.HAZARDS.put(ckey, String(now), { expirationTtl: 120 });
+    await Store.put(env, h);
+    await Store.setMeta(env, ckey, now, 120e3);
     return json({ ok: true, merged: true, hazard: publicShape(h) });
   }
 
@@ -265,9 +279,8 @@ async function handleReport(env, req) {
     probes: { clear: 0, still: 0 },
     by: device.slice(0, 12),
   };
-  await env.HAZARDS.put(`h:${cellOf(h.lat, h.lon)}:${id}`, JSON.stringify(h),
-    { expirationTtl: Math.ceil(ttlFor(type) / 1000) + 300 });
-  await env.HAZARDS.put(ckey, String(now), { expirationTtl: 120 });
+  await Store.put(env, h);
+  await Store.setMeta(env, ckey, now, 120e3);
   return json({ ok: true, merged: false, hazard: publicShape(h) });
 }
 
@@ -278,10 +291,8 @@ async function handleVote(env, req, id, kind) {
   if (!isFinite(lat) || !isFinite(lon)) return json({ error: '需要 lat 與 lon 以定位事件' }, 400);
 
   const now = Date.now();
-  const keys = await listCells(env, lat, lon, 2000);
-  const all = await getMany(env, keys);
-  const h = all.find(x => x.id === id);
-  if (!h) return json({ error: '找不到這筆事件（可能已過期）' }, 404);
+  const h = await Store.get(env, id);
+  if (!h || h.expires <= now) return json({ error: '找不到這筆事件（可能已過期）' }, 404);
 
   if (kind === 'confirm') {
     h.confirms = (h.confirms || 0) + 1;
@@ -290,13 +301,11 @@ async function handleVote(env, req, id, kind) {
   } else {
     h.clears = (h.clears || 0) + 1;
   }
-  const key = `h:${cellOf(h.lat, h.lon)}:${h.id}`;
   if (!isAlive(h, now)) {
-    await env.HAZARDS.delete(key);
+    await Store.del(env, h.id);
     return json({ ok: true, removed: true });
   }
-  await env.HAZARDS.put(key, JSON.stringify(h),
-    { expirationTtl: Math.max(60, Math.ceil((h.expires - now) / 1000) + 300) });
+  await Store.put(env, h);
   return json({ ok: true, hazard: publicShape(h) });
 }
 
@@ -314,14 +323,12 @@ async function handleRetract(env, req, id) {
   if (!isFinite(lat) || !isFinite(lon)) return json({ error: '需要 lat 與 lon 以定位事件' }, 400);
   if (!device) return json({ error: '需要 device 才能證明是本人' }, 400);
 
-  const now = Date.now();
-  const all = await getMany(env, await listCells(env, lat, lon, 2000));
-  const h = all.find(x => x.id === id);
+  const h = await Store.get(env, id);
   if (!h) return json({ error: '找不到這筆事件（可能已過期）' }, 404);
   if ((h.by || '') !== device.slice(0, 12))
     return json({ error: '這不是你回報的事件。若你確認現場已排除，請改用「已經清掉了」' }, 403);
 
-  await env.HAZARDS.delete(`h:${cellOf(h.lat, h.lon)}:${h.id}`);
+  await Store.del(env, h.id);
   return json({ ok: true, retracted: true });
 }
 
@@ -341,22 +348,19 @@ async function handleProbe(env, req, id) {
   if (!isFinite(lat) || !isFinite(lon)) return json({ error: '需要 lat 與 lon 以定位事件' }, 400);
 
   const now = Date.now();
-  const all = await getMany(env, await listCells(env, lat, lon, 2000));
-  const h = all.find(x => x.id === id);
-  if (!h) return json({ error: 'not found' }, 404);
+  const h = await Store.get(env, id);
+  if (!h || h.expires <= now) return json({ error: 'not found' }, 404);
 
   h.probes = h.probes || { clear: 0, still: 0 };
   if (b.slowed) h.probes.still = Math.min(PROBE_MAX, (h.probes.still || 0) + 1);
   else h.probes.clear = Math.min(PROBE_MAX, (h.probes.clear || 0) + 1);
 
   const score = scoreOf(h, now);
-  const key = `h:${cellOf(h.lat, h.lon)}:${h.id}`;
   if (!isAlive(h, now)) {
-    await env.HAZARDS.delete(key);
+    await Store.del(env, h.id);
     return json({ ok: true, removed: true, reason: '車流顯示已排除', score });
   }
-  await env.HAZARDS.put(key, JSON.stringify(h),
-    { expirationTtl: Math.max(60, Math.ceil((h.expires - now) / 1000) + 300) });
+  await Store.put(env, h);
   return json({ ok: true, score, probes: h.probes });
 }
 
@@ -396,7 +400,7 @@ const TDX_EVENT_URLS = [
   'https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Freeway?%24format=JSON',
   'https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Highway?%24format=JSON',
 ];
-const OFFICIAL_KEY = 'official';           // 整份官方事件清單存成一個 KV key
+const OFFICIAL_KEY = 'official';           // 整份官方事件清單存成 meta 表的一筆
 const OFFICIAL_STALE_MS = 30 * 60e3;       // 排程停擺超過 30 分鐘就不再提供，寧缺勿錯
 const OFFICIAL_DEDUPE_M = 300;             // 使用者回報已經在附近就不重複給官方那筆
 
@@ -453,7 +457,7 @@ function officialFromTdx(o, freeway) {
  * 網址可用 TDX_INCIDENT_URL 覆寫（多個用逗號分隔），沒設就用上面實測過的兩個。
  */
 /**
- * TDX 存取憑證。一次有效 24 小時，存在 KV 重複使用，快過期（剩不到 1 小時）才換新。
+ * TDX 存取憑證。一次有效 24 小時，存在資料庫重複使用，快過期（剩不到 1 小時）才換新。
  * 以前每 10 分鐘的排程都重新申請一次，一天 144 次 —— 憑證服務有頻率限制，
  * 實際部署後馬上就吃到 429，整個官方事件功能等於沒作用。
  */
@@ -461,7 +465,7 @@ const TDX_TOKEN_KEY = 'tdx:token';
 async function tdxToken(env, force) {
   const now = Date.now();
   if (!force) {
-    const c = await env.HAZARDS.get(TDX_TOKEN_KEY, 'json');
+    const c = await Store.meta(env, TDX_TOKEN_KEY);
     if (c && c.tk && c.exp - now > 3600e3) return c.tk;
   }
   const r = await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token', {
@@ -474,8 +478,7 @@ async function tdxToken(env, force) {
   const j = await r.json();
   if (!j.access_token) { officialErr = 'token 沒有 access_token'; return null; }
   const exp = now + (j.expires_in || 86400) * 1000;
-  await env.HAZARDS.put(TDX_TOKEN_KEY, JSON.stringify({ tk: j.access_token, exp }),
-    { expirationTtl: Math.max(60, Math.floor((exp - now) / 1000)) });
+  await Store.setMeta(env, TDX_TOKEN_KEY, { tk: j.access_token, exp }, exp - now);
   return j.access_token;
 }
 
@@ -525,16 +528,12 @@ async function reconcile(env) {
   if (!official) return { skipped: '未設定 TDX 金鑰或取得失敗', reason: officialErr };
 
   const now = Date.now();
-  // 整份清單存一個 key：查詢時只要多讀一次，不用為官方事件另建網格索引
-  await env.HAZARDS.put(OFFICIAL_KEY, JSON.stringify({ t: now, items: official }),
-    { expirationTtl: 2 * 3600 });
+  // 整份清單存一筆：查詢時只要多讀一次
+  await Store.setMeta(env, OFFICIAL_KEY, { t: now, items: official }, 2 * 3600e3);
 
-  const res = await env.HAZARDS.list({ prefix: 'h:', limit: 1000 });
   let opened = 0, closed = 0, checked = 0;
-
-  for (const k of res.keys) {
-    const h = await env.HAZARDS.get(k.name, 'json');
-    if (!h || h.retracted) continue;
+  for (const h of await Store.alive(env, now)) {
+    if (h.retracted) continue;
     checked++;
     let best = null;
     for (const o of official) {
@@ -550,14 +549,13 @@ async function reconcile(env) {
       /* 即時清單只列「進行中」的事件，沒有結束時間欄位。
          之前對上過官方、這次清單裡卻沒有了 = 官方已經排除 → 直接關掉，不必等衰減。
          從來沒對上過的（官方沒收錄）就不動，交給時間衰減與車流探針。 */
-      if (h.officialOpen) { await env.HAZARDS.delete(k.name); closed++; }
+      if (h.officialOpen) { await Store.del(env, h.id); closed++; }
       continue;
     }
     if (!h.officialOpen) {                 // 狀態有變才寫，省 KV 寫入額度
       h.officialOpen = true;
       h.officialCleared = false;
-      await env.HAZARDS.put(k.name, JSON.stringify(h),
-        { expirationTtl: Math.max(60, Math.ceil((h.expires - now) / 1000) + 300) });
+      await Store.put(env, h);
     }
     opened++;
   }
@@ -569,7 +567,7 @@ async function reconcile(env) {
  * 使用者回報已經在附近（同類、300 公尺內）就不重複給；排程停擺太久就不給，寧缺勿錯。
  */
 async function officialNear(env, lat, lon, r, userHazards, now) {
-  const o = await env.HAZARDS.get(OFFICIAL_KEY, 'json');
+  const o = await Store.meta(env, OFFICIAL_KEY);
   if (!o || !Array.isArray(o.items) || now - o.t > OFFICIAL_STALE_MS) return [];
   const out = [];
   for (const x of o.items) {
@@ -598,7 +596,10 @@ async function officialNear(env, lat, lon, r, userHazards, now) {
 export default {
   /** Cloudflare 排程觸發：對帳官方事件。在 wrangler.toml 設 crons。 */
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(reconcile(env).then(r => console.log('reconcile', JSON.stringify(r))));
+    ctx.waitUntil((async () => {
+      await Store.sweep(env, Date.now());
+      console.log('reconcile', JSON.stringify(await reconcile(env)));
+    })());
   },
 
   async fetch(req, env) {
@@ -607,7 +608,7 @@ export default {
     const p = url.pathname.replace(/\/+$/, '') || '/';
 
     try {
-      if (!env.HAZARDS) return json({ error: '尚未綁定 KV namespace（HAZARDS）' }, 500);
+      if (!env.DB) return json({ error: '尚未綁定 D1 資料庫（DB）' }, 500);
 
       if (req.method === 'GET' && (p === '/hazards' || p === '/')) return handleQuery(env, url);
       if (req.method === 'POST' && p === '/report') return handleReport(env, req);
@@ -628,8 +629,7 @@ export default {
       }
 
       if (req.method === 'GET' && p === '/stats') {
-        const res = await env.HAZARDS.list({ prefix: 'h:', limit: 1000 });
-        return json({ ok: true, stored: res.keys.length, truncated: !res.list_complete });
+        return json({ ok: true, stored: await Store.count(env, Date.now()), truncated: false });
       }
       return json({ error: 'not found', paths: ['/hazards', '/report',
         '/hazards/:id/confirm', '/hazards/:id/clear',

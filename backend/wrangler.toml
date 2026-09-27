@@ -2,15 +2,15 @@ name = "luleopard-hazards"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
-# 建立 KV namespace：
-#   npx wrangler kv namespace create HAZARDS
-#   npx wrangler kv namespace create HAZARDS --preview
-# 把它印出來的 id 填到下面，然後 npx wrangler deploy
-
-[[kv_namespaces]]
-binding = "HAZARDS"
-id = "fc749e81dc4f442ba8b47e2e482b808a"
-preview_id = "202da23467f74dfb8bf5062860229cda"
+# 資料庫：Cloudflare D1（免費方案一天 500 萬列讀取、10 萬列寫入）
+# 以前用 KV，但 KV 免費方案一天只有 1000 次 list／1000 次寫入，上線一天就會爆。
+# 新環境建立方式：
+#   npx wrangler d1 create luleopard            → 把 database_id 貼到下面
+#   npx wrangler d1 execute luleopard --remote --file=schema.sql
+[[d1_databases]]
+binding = "DB"
+database_name = "luleopard"
+database_id = "6438763c-6be2-4109-8ae0-fd40fd8de564"
 
 # 每 10 分鐘跟官方事件對帳一次，官方說結束就自動關掉對應的使用者回報。
 # 這是「不需要有人顧後台」的關鍵：施工/事故的結束時間官方本來就有。

@@ -1,32 +1,34 @@
 /**
- * 後端邏輯測試：用一個假的 KV 直接跑 worker.js，不需要 wrangler 或網路。
+ * 後端邏輯測試：用本機 SQLite（node:sqlite）模擬 Cloudflare D1，直接跑 worker.js。
+ * 資料表就是 schema.sql 本身，所以 SQL 寫錯在這裡就會炸，不用等部署。
+ * 不需要 wrangler 也不需要網路。
  *   node backend/test_worker.mjs
  */
 import worker from './worker.js';
+import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 
-// ── 假的 Cloudflare KV ────────────────────────────────────────
-function makeKV() {
-  const m = new Map();                       // key -> {v, exp}
-  return {
-    _m: m,
-    async get(k, type) {
-      const e = m.get(k);
-      if (!e) return null;
-      if (e.exp && e.exp < Date.now()) { m.delete(k); return null; }
-      return type === 'json' ? JSON.parse(e.v) : e.v;
-    },
-    async put(k, v, opt) {
-      m.set(k, { v, exp: opt?.expirationTtl ? Date.now() + opt.expirationTtl * 1000 : 0 });
-    },
-    async delete(k) { m.delete(k); },
-    async list({ prefix, limit = 1000 }) {
-      const keys = [...m.keys()].filter(k => k.startsWith(prefix)).slice(0, limit);
-      return { keys: keys.map(name => ({ name })), list_complete: true };
-    },
-  };
+// ── 假的 Cloudflare D1（prepare → bind → all / first / run）──────────
+const SCHEMA = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
+function makeD1() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(SCHEMA);
+  const stmt = (sql, args = []) => ({
+    bind: (...a) => stmt(sql, a),
+    async all() { return { results: db.prepare(sql).all(...args) }; },
+    async first() { return db.prepare(sql).get(...args) ?? null; },
+    async run() { db.prepare(sql).run(...args); return { success: true }; },
+  });
+  return { prepare: sql => stmt(sql) };
 }
+// 測試用：直接塞一筆（繞過 API，模擬舊資料）
+const putRaw = (e, h) => e.DB.prepare('INSERT OR REPLACE INTO hazards (id, lat, lon, expires, data) VALUES (?1, ?2, ?3, ?4, ?5)')
+  .bind(h.id, h.lat, h.lon, h.expires, JSON.stringify(h)).run();
+const metaGet = async (e, k) => { const r = await e.DB.prepare('SELECT v FROM meta WHERE k = ?1').bind(k).first(); return r ? JSON.parse(r.v) : null; };
+const metaSet = (e, k, v) => e.DB.prepare('INSERT OR REPLACE INTO meta (k, v, exp) VALUES (?1, ?2, NULL)').bind(k, JSON.stringify(v)).run();
+const metaDel = (e, k) => e.DB.prepare('DELETE FROM meta WHERE k = ?1').bind(k).run();
 
-const env = { HAZARDS: makeKV() };
+const env = { DB: makeD1() };
 const BASE = 'https://x.dev';
 
 const call = async (method, path, body) => {
@@ -161,8 +163,7 @@ console.log('\n── 過期 ──');
     id: 'stale001', type: '掉落物', lat: A.lat, lon: A.lon,
     t: Date.now() - 9e6, expires: Date.now() - 1000, confirms: 0, clears: 0,
   };
-  await env.HAZARDS.put(`h:${Math.floor(A.lat / 0.05)}_${Math.floor(A.lon / 0.05)}:stale001`,
-    JSON.stringify(stale));
+  await putRaw(env, stale);
   const r = await call('GET', `/hazards?lat=${A.lat}&lon=${A.lon}&r=3000`);
   t('過期事件不會被回傳', !r.body.hazards.some(h => h.id === 'stale001'));
 }
@@ -200,15 +201,12 @@ console.log('\n── 置信度衰減 ──');
     expires: Date.now() + 3600e3,
   });
   const S = (...a) => worker.__scoreOf ? worker.__scoreOf(mk(...a)) : null;
-  // scoreOf 沒外流，改用 API 觀察：塞一筆舊事故進 KV，看查詢會不會回傳
-  const put = async (h, key) => env.HAZARDS.put(key, JSON.stringify(h));
-  const cell = `${Math.floor(24.2 / 0.05)}_${Math.floor(120.6 / 0.05)}`;
-
-  await put({ ...mk('事故', 5), id: 'fresh' }, `h:${cell}:fresh`);
-  await put({ ...mk('事故', 90), id: 'stale' }, `h:${cell}:stale`);
-  await put({ ...mk('事故', 20, 0, 4), id: 'probed' }, `h:${cell}:probed`);
-  await put({ ...mk('事故', 40, 4), id: 'confirmed' }, `h:${cell}:confirmed`);
-  await put({ ...mk('施工', 180), id: 'roadwork' }, `h:${cell}:roadwork`);
+  // scoreOf 沒外流，改用 API 觀察：塞幾筆不同年紀的事故進資料庫，看查詢會不會回傳
+  await putRaw(env, { ...mk('事故', 5), id: 'fresh' });
+  await putRaw(env, { ...mk('事故', 90), id: 'stale' });
+  await putRaw(env, { ...mk('事故', 20, 0, 4), id: 'probed' });
+  await putRaw(env, { ...mk('事故', 40, 4), id: 'confirmed' });
+  await putRaw(env, { ...mk('施工', 180), id: 'roadwork' });
 
   const q = await call('GET', `/hazards?lat=24.2&lon=120.6&r=1000`);
   const got = Object.fromEntries(q.body.hazards.map(h => [h.id, h.score]));
@@ -263,7 +261,7 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
     if (u.includes('LiveEvent/Highway')) return new Response(JSON.stringify(FX.Highway), { status: 200 });
     return realFetch(u, opt);
   };
-  const env2 = { HAZARDS: makeKV(), TDX_ID: 'id', TDX_SECRET: 'sec' };
+  const env2 = { DB: makeD1(), TDX_ID: 'id', TDX_SECRET: 'sec' };
   const call2 = async (method, path, body) => {
     const res = await worker.fetch(new Request(BASE + path, { method,
       headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined }), env2);
@@ -272,7 +270,7 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
 
   const r = await call2('POST', '/reconcile');
   t('有金鑰時會抓官方事件', r.status === 200 && r.body.officialCount > 0, r.body);
-  const stored = await env2.HAZARDS.get('official', 'json');
+  const stored = await metaGet(env2, 'official');
   t('「機動開放路肩」不列入（無影響、數量多，唸了只是噪音）',
     stored && !stored.items.some(x => /路肩/.test(x.note)), stored && stored.items.map(x => x.note));
   t('座標從 WKT POINT 解析（經度在前）', stored.items.every(x => x.lat > 21 && x.lat < 26 && x.lon > 119 && x.lon < 123));
@@ -316,15 +314,15 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
   FX.Freeway.LiveEvents = saved;
 
   // 其中一個來源失敗 → 整批作廢，不能拿半份清單去關別人的回報
-  const before = await env2.HAZARDS.get('official', 'json');
+  const before = await metaGet(env2, 'official');
   fail503 = true;
   const r5 = await call2('POST', '/reconcile');
-  const after = await env2.HAZARDS.get('official', 'json');
+  const after = await metaGet(env2, 'official');
   t('來源失敗時略過，不覆蓋上一份清單', !!r5.body.skipped && after.t === before.t, r5.body);
   fail503 = false;
 
   // 排程停擺太久 → 不再提供舊清單
-  await env2.HAZARDS.put('official', JSON.stringify({ ...after, t: Date.now() - 31 * 60e3 }));
+  await metaSet(env2, 'official', { ...after, t: Date.now() - 31 * 60e3 });
   const q6 = await call2('GET', `/hazards?lat=${acc.lat}&lon=${acc.lon}&r=3000`);
   t('官方清單超過 30 分鐘沒更新就不提供', q6.body.official === 0, q6.body);
 
@@ -332,18 +330,46 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
   let tokenCalls = 0;
   const wrapped = globalThis.fetch;
   globalThis.fetch = async (u, o) => { if (String(u).includes('/token')) tokenCalls++; return wrapped(u, o); };
-  await env2.HAZARDS.delete('tdx:token');
+  await metaDel(env2, 'tdx:token');
   await call2('POST', '/reconcile'); await call2('POST', '/reconcile'); await call2('POST', '/reconcile');
   t('TDX 憑證快取：三次排程只申請一次', tokenCalls === 1, tokenCalls);
 
   globalThis.fetch = realFetch;
 }
 
-console.log('\n── 沒綁 KV 時要講清楚 ──');
+console.log('\n── 免費額度（這次換 D1 的原因）──');
+{
+  const e = { DB: makeD1() };
+  let n = 0;
+  const orig = e.DB.prepare;
+  e.DB.prepare = sql => { n++; return orig(sql); };
+  for (let i = 0; i < 30; i++)
+    await putRaw({ DB: { prepare: orig } }, { id: 'q' + i, type: '掉落物', lat: 24 + i * 0.01, lon: 121, t: Date.now(),
+      lastReport: Date.now(), expires: Date.now() + 3600e3, confirms: 0, clears: 0 });
+  n = 0;
+  const res = await worker.fetch(new Request(BASE + '/hazards?lat=24.1&lon=121&r=15000'), e);
+  const body = await res.json();
+  t('查 15 公里半徑只用 2 個 SQL（事件＋官方清單）', n === 2 && body.count > 0, { sql: n, count: body.count });
+
+  // 排程會清掉過期超過 1 小時的資料（D1 不像 KV 會自己過期）
+  const e2 = { DB: makeD1() };
+  await putRaw(e2, { id: 'old1', type: '掉落物', lat: 24, lon: 121, expires: Date.now() - 2 * 3600e3 });
+  await putRaw(e2, { id: 'new1', type: '掉落物', lat: 24, lon: 121, expires: Date.now() + 3600e3 });
+  await metaSet(e2, 'c:olddev', 1);
+  await e2.DB.prepare('UPDATE meta SET exp = ?1 WHERE k = ?2').bind(Date.now() - 1000, 'c:olddev').run();
+  const waits = [];
+  await worker.scheduled({}, e2, { waitUntil: p => waits.push(p) });
+  await Promise.all(waits);
+  const left = (await e2.DB.prepare('SELECT id FROM hazards').all()).results.map(r => r.id);
+  t('排程清掉過期事件、保留有效的', left.length === 1 && left[0] === 'new1', left);
+  t('排程清掉過期的冷卻紀錄', (await metaGet(e2, 'c:olddev')) === null);
+}
+
+console.log('\n── 沒綁資料庫時要講清楚 ──');
 {
   const res = await worker.fetch(new Request(BASE + '/hazards?lat=25&lon=121'), {});
   const body = await res.json();
-  t('回 500 並說明未綁 KV', res.status === 500 && /KV/.test(body.error), body);
+  t('回 500 並說明未綁 D1', res.status === 500 && /D1/.test(body.error), body);
 }
 
 console.log(`\n${'='.repeat(46)}\n通過 ${pass}　失敗 ${fail}\n${'='.repeat(46)}`);

@@ -16,27 +16,30 @@
 
 ```bash
 cd backend
-npm i -D wrangler
 
-# 1. 建立 KV
-npx wrangler kv namespace create HAZARDS
-npx wrangler kv namespace create HAZARDS --preview
-#    把印出來的兩個 id 貼進 wrangler.toml
+# 1. 建立 D1 資料庫，把印出來的 database_id 貼進 wrangler.toml
+npx wrangler d1 create luleopard
 
-# 2. 部署
+# 2. 建立資料表
+npx wrangler d1 execute luleopard --remote --file=schema.sql
+
+# 3. 部署
 npx wrangler deploy
 ```
 
 部署完會拿到一個網址，例如
 `https://luleopard-hazards.你的帳號.workers.dev`
 
-把它填進 App 的「回報 → 共享回報」欄位就完成了。
+> **為什麼是 D1 不是 KV**：KV 免費方案一天只有 1000 次 list、1000 次寫入。
+> 以前用 KV 網格前綴當空間索引，一次查詢要 list 約 81 格，一個人開一小時車就用完一整天；
+> 回報、確認、車流探針也都算寫入。D1 免費方案一天 500 萬列讀取、10 萬列寫入，
+> 一次查詢只要 2 個 SQL（附近事件＋官方清單）。另外 D1 是強一致，新回報馬上查得到（KV 要等最多 60 秒）。
 
 ### 本機開發
 
 ```bash
 npx wrangler dev            # 起在 localhost:8787
-node test_worker.mjs        # 純邏輯測試，不需要 wrangler 也不需要網路
+node test_worker.mjs        # 用本機 SQLite 模擬 D1，不需要 wrangler 也不需要網路
 ```
 
 ---
