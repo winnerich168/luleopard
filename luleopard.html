@@ -51,6 +51,12 @@ button{font-family:inherit;color:inherit;background:none;border:none;cursor:poin
 .gpswarn{margin-top:7px;padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.5;border:1px solid}
 .gpswarn.warn{background:#3a3110;border-color:var(--warn);color:#ffe6a8}
 .gpswarn.bad{background:#3f1616;border-color:var(--danger);color:#ffd0d0}
+.gpswarn.info{background:#0f2536;border-color:var(--info);color:#cfe8ff}
+.gpsstate{font-weight:700}
+.gpsstate.ok{color:#2fd07a}.gpsstate.warn{color:var(--warn)}.gpsstate.bad{color:var(--danger)}
+.gpshelp summary{cursor:pointer;padding:8px 0;font-size:13px;color:var(--txt)}
+.gpshelp ol{margin:2px 0 8px;padding-left:20px;font-size:12px;line-height:1.75;color:var(--dim)}
+.gpshelp b{color:var(--txt)}
 .gpswarn>div:first-child{font-weight:700;margin-bottom:2px}
 .covgrid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .covok{background:#16331f;border:1px solid #2fd07a55;color:#9de8bd;border-radius:6px;padding:4px 8px;font-size:12px}
@@ -552,6 +558,45 @@ textarea{resize:vertical;min-height:74px}
 
   <!-- 設定 -->
   <section class="view" id="v-set"><div class="pad">
+    <div class="card" id="gpsCard">
+      <h3>📡 定位 <small>之前不準？先看這裡</small></h3>
+      <div class="row"><label>定位來源</label><span id="gpsCardState" class="gpsstate">—</span></div>
+      <div class="row"><label>誤差</label><b id="gpsCardAcc">—</b></div>
+      <div class="row"><label>更新頻率</label><b id="gpsCardGap">—</b></div>
+      <div class="row"><label>車速</label><b id="gpsCardSpd">—</b></div>
+      <div class="hint" style="margin-top:8px">
+        行車警示需要 <b>GPS 衛星</b>（誤差 30 公尺內、約每秒更新）。
+        衛星訊號要「看得到天空」：室內、地下室、隧道、停車場收不到；剛開始定位要等 10～30 秒；
+        車上請把手機放在靠擋風玻璃的位置（含金屬的隔熱紙也會擋訊號）。
+      </div>
+      <button class="btn wide" id="btnGpsRestart">🔄 重新搜尋 GPS</button>
+      <details class="gpshelp" id="gpsHelpIos">
+        <summary>🍎 iPhone：開啟「精確位置」</summary>
+        <ol>
+          <li><b>設定 → 隱私權與安全性 → 定位服務</b>：確認最上面是開啟的</li>
+          <li>往下找 <b>Safari 網站</b>（加到主畫面的鹿豹也用這一項）→ 選 <b>「使用 App 期間」</b></li>
+          <li>同一頁把 <b>「精確位置」</b>打開 —— 沒開的話誤差會是好幾公里，測速警示完全不能用</li>
+          <li>在 Safari 開鹿豹時，點網址列左邊的 <b>「大小」圖示 → 網站設定 → 位置 → 允許</b></li>
+        </ol>
+      </details>
+      <details class="gpshelp" id="gpsHelpAndroid">
+        <summary>🤖 Android：開啟「精確位置」</summary>
+        <ol>
+          <li>從螢幕上方往下拉，確認 <b>「位置資訊／定位」</b>是開啟的</li>
+          <li><b>設定 → 位置資訊 → 位置資訊服務 → Google 定位精確度</b>：開啟</li>
+          <li><b>設定 → 應用程式 → Chrome → 權限 → 位置資訊</b>：選「僅在使用應用程式時允許」，並打開 <b>「使用精確位置」</b></li>
+          <li>在 Chrome 開鹿豹時，點網址列左邊的圖示 → <b>權限 → 位置資訊 → 允許</b></li>
+        </ol>
+      </details>
+      <details class="gpshelp">
+        <summary>📲 像 App 一樣使用（加到主畫面）</summary>
+        <ol>
+          <li><b>iPhone</b>：用 Safari 開鹿豹 → 下方的「分享」按鈕 → <b>加入主畫面</b></li>
+          <li><b>Android</b>：用 Chrome 開鹿豹 → 右上「⋮」→ <b>加到主畫面／安裝應用程式</b></li>
+          <li>之後從主畫面的鹿豹圖示開啟，全螢幕、不會有網址列，定位權限照上面的設定</li>
+        </ol>
+      </details>
+    </div>
     <div class="card">
       <h3>🔔 警示</h3>
       <div class="row"><div><label>語音播報</label><div class="hint">使用系統中文語音朗讀警示</div></div>
@@ -1431,13 +1476,30 @@ const GPSQ={
   accs:[],            // 最近的精度（公尺）
   hwSpeed:0, hwHead:0, samples:0,   // 硬體有給速度／航向的次數
   frozen:0,           // 連續拿到「一模一樣座標」的次數
-  level:'unknown',    // good | poor | unusable | unknown
+  moving:0, hwSpeedMoving:0,        // 真的在移動的樣本數、其中有硬體車速的次數
+  t0:0,               // 第一筆定位的時間（暖機判斷用）
+  level:'unknown',    // good | poor | unusable | searching | unknown
   reason:'',
 };
 const med=a=>{ if(!a.length) return null; const s=a.slice().sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
 
+/* 手機或平板（決定警告文字）。iPadOS 會偽裝成 Mac，要另外用觸控點判斷 */
+const IS_MOBILE=(()=>{ try{
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      || (navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform||'')); }catch(e){ return false; } })();
+
 function gpsSample(lat,lon,heading,speed,acc,t){
   const L=GPS.last;
+  if(!GPSQ.t0) GPSQ.t0=t;
+  /* 「真的在移動」：硬體車速 > 1.5 m/s，或位移明顯大於定位誤差。
+     停著不動的手機，瀏覽器本來就很久才回報一次、也不給車速 ——
+     這些特徵只有在移動中出現才代表定位有問題。 */
+  const hwMove=speed!=null&&!isNaN(speed)&&speed>1.5;
+  const jump=(L&&L.t)? dist(L.lat,L.lon,lat,lon) : 0;
+  if(hwMove||jump>Math.max(15,acc||0)){
+    GPSQ.moving++;
+    if(speed!=null&&!isNaN(speed)) GPSQ.hwSpeedMoving++;
+  }
   if(L&&L.t){
     GPSQ.gaps.push((t-L.t)/1000); if(GPSQ.gaps.length>12) GPSQ.gaps.shift();
     // 座標完全沒變 = 快取沒更新（真 GPS 就算停車也會有幾公尺抖動）
@@ -1453,37 +1515,97 @@ function gpsSample(lat,lon,heading,speed,acc,t){
 function gpsGrade(){
   const n=GPSQ.samples;
   if(n<3){ GPSQ.level='unknown'; GPSQ.reason=''; return GPSQ; }
-  const acc=med(GPSQ.accs), gap=med(GPSQ.gaps);
-  const 有硬體速度=GPSQ.hwSpeed/n>0.5;
+  // 精度看「最近幾筆」：手機剛開機會先給幾筆 Wi-Fi／基地台的粗略位置（誤差上千公尺），
+  // 鎖定衛星後就降到 10 公尺內。拿整段中位數會被暖機期拖累很久。
+  const acc=med(GPSQ.accs.slice(-4)), gap=med(GPSQ.gaps);
+  const accGood=acc!=null&&acc<=50;
+  const moving=GPSQ.moving>=3;
   const rs=[];
   let lv='good';
   // 精度：行車警示要判斷 100 公尺級距，誤差超過 50 公尺就已經很勉強
   if(acc!=null&&acc>150){ lv='unusable'; rs.push('定位誤差 ±'+Math.round(acc)+' 公尺'); }
   else if(acc!=null&&acc>50){ if(lv==='good') lv='poor'; rs.push('定位誤差 ±'+Math.round(acc)+' 公尺'); }
-  // 更新間隔：時速 100 每秒 28 公尺，超過 5 秒就會跨過警示窗
-  if(gap!=null&&gap>8){ lv='unusable'; rs.push('每 '+Math.round(gap)+' 秒才更新一次'); }
-  else if(gap!=null&&gap>3){ if(lv==='good') lv='poor'; rs.push('每 '+gap.toFixed(1)+' 秒更新一次'); }
-  if(!有硬體速度){ if(lv==='good') lv='poor'; rs.push('裝置沒有提供車速（需靠位置推算）'); }
-  if(GPSQ.frozen>=3){ lv='unusable'; rs.push('位置已停止更新'); }
+  // 更新間隔、座標凍住：手機停著且精度好的時候，瀏覽器本來就不會一直回報，不算問題
+  if(moving||!accGood){
+    // 時速 100 每秒 28 公尺，超過 5 秒就會跨過警示窗
+    if(gap!=null&&gap>8){ lv='unusable'; rs.push('每 '+Math.round(gap)+' 秒才更新一次'); }
+    else if(gap!=null&&gap>3){ if(lv==='good') lv='poor'; rs.push('每 '+gap.toFixed(1)+' 秒更新一次'); }
+    if(GPSQ.frozen>=3){ lv='unusable'; rs.push('位置已停止更新'); }
+  }
+  // 車速：停著的手機不給車速是正常的，只看移動中的樣本
+  if(moving&&GPSQ.hwSpeedMoving/GPSQ.moving<=0.5){ if(lv==='good') lv='poor'; rs.push('裝置沒有提供車速（需靠位置推算）'); }
+  // 手機還沒開始移動：頂多黃色提醒 —— 停在家裡、室內收不到衛星很正常，開出去就會好
+  if(IS_MOBILE&&!moving&&lv==='unusable') lv='poor';
+  // 開始定位 30 秒內：還在搜尋衛星，不要一開機就判它壞掉
+  if(lv!=='good'&&Date.now()-GPSQ.t0<30000){ lv='searching'; }
   GPSQ.level=lv; GPSQ.reason=rs.join('、');
   return GPSQ;
 }
 
 function gpsResetQuality(){
   GPSQ.gaps=[]; GPSQ.accs=[]; GPSQ.hwSpeed=0; GPSQ.hwHead=0;
-  GPSQ.samples=0; GPSQ.frozen=0; GPSQ.level='unknown'; GPSQ.reason='';
+  GPSQ.samples=0; GPSQ.frozen=0; GPSQ.moving=0; GPSQ.hwSpeedMoving=0; GPSQ.t0=0;
+  GPSQ.level='unknown'; GPSQ.reason='';
 }
 
 function paintGpsWarn(simulated){
+  paintGpsCard();
   const box=el('gpsWarn'); if(!box) return;
   if(simulated||GPSQ.level==='good'||GPSQ.level==='unknown'){ box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
+  if(GPSQ.level==='searching'){
+    box.className='gpswarn info';
+    el('gpsWarnTitle').textContent='📡 正在搜尋 GPS 衛星…';
+    el('gpsWarnBody').textContent='剛開始定位的 10～30 秒會先用 Wi-Fi／基地台估算，位置比較不準，收到衛星後會自動變準。';
+    return;
+  }
   const bad=GPSQ.level==='unusable';
   box.className='gpswarn '+(bad?'bad':'warn');
-  el('gpsWarnTitle').textContent= bad? '⛔ 這台裝置的定位不足以做行車警示'
-                                     : '⚠️ 定位品質不佳，警示可能不準';
-  el('gpsWarnBody').textContent= GPSQ.reason +
-    (bad? '。筆電／桌機沒有 GPS 晶片，是用 Wi-Fi 估算位置 —— 請改用手機測試。' : '。');
+  if(IS_MOBILE){
+    /* 手機本身有 GPS。不準幾乎都是「收不到衛星」或「沒給精確位置權限」，
+       絕對不能叫使用者「改用手機」—— 他就是在用手機。 */
+    el('gpsWarnTitle').textContent= bad? '⛔ 沒有收到 GPS 衛星訊號，警示可能不準'
+                                       : '⚠️ GPS 訊號弱，警示可能不準';
+    el('gpsWarnBody').textContent= GPSQ.reason+'。常見原因：在室內／地下室／隧道、'
+      +'或手機沒開「精確位置」。到「設定 → 📡 定位」可以看詳細狀態與設定方法。';
+  }else{
+    el('gpsWarnTitle').textContent= bad? '⛔ 這台裝置的定位不足以做行車警示'
+                                       : '⚠️ 定位品質不佳，警示可能不準';
+    el('gpsWarnBody').textContent= GPSQ.reason +
+      (bad? '。筆電／桌機沒有 GPS 晶片，是用 Wi-Fi 估算位置 —— 請改用手機。' : '。');
+  }
+}
+
+/**
+ * 設定頁「📡 定位」卡片：即時顯示定位狀態，讓使用者自己判斷是不是沒收到 GPS。
+ * 誤差 ≤ 30 公尺幾乎一定是衛星定位；> 150 公尺是 Wi-Fi／基地台估算。
+ */
+function paintGpsCard(){
+  const box=el('gpsCardState'); if(!box) return;
+  const L=GPS.last, acc=med(GPSQ.accs.slice(-4)), gap=med(GPSQ.gaps);
+  let src='—', cls='';
+  if(!GPS.watch&&!GPS.native&&!L){ src='尚未啟動（按首頁的「開始導航警示」）'; }
+  else if(!L){ src='等待定位…'; cls='warn'; }
+  else if(SIM){ src='模擬行車中'; }
+  else if(acc==null){ src='未知（裝置沒有回報精度）'; }
+  else if(acc<=30){ src='🛰️ GPS 衛星（準確）'; cls='ok'; }
+  else if(acc<=150){ src='📶 衛星訊號弱，混合 Wi-Fi 估算'; cls='warn'; }
+  else { src='📶 沒收到衛星，只用 Wi-Fi／基地台估算'; cls='bad'; }
+  box.textContent=src; box.className='gpsstate '+cls;
+  el('gpsCardAcc').textContent= acc!=null? '±'+Math.round(acc)+' 公尺' : '—';
+  el('gpsCardGap').textContent= gap!=null? (gap<1.5?'約每秒一次':'約每 '+gap.toFixed(gap<10?1:0)+' 秒一次') : '—';
+  el('gpsCardSpd').textContent= !L? '—' : L.speedHw? '手機提供（準確）'
+    : (L.speed!=null&&L.speedOk&&L.speed>1.5)? '由位置推算（較不準）' : '尚無（停著時正常）';
+}
+function restartGPS(){
+  try{
+    if(GPS.native&&GPS.watch!=null) Native.clearWatcher(GPS.watch);
+    else if(GPS.watch!=null&&navigator.geolocation) navigator.geolocation.clearWatch(GPS.watch);
+  }catch(e){}
+  GPS.watch=null; GPS.native=false; GPS.last=null; GPS.ok=false;
+  gpsResetQuality(); paintGpsWarn(false);
+  startGPS();
+  toast('已重新搜尋 GPS，請到看得到天空的地方稍候 10～30 秒');
 }
 
 /* 推算速度時的防護值 */
@@ -1541,7 +1663,8 @@ function onPos(lat,lon,heading,speed,acc,simulated){
   const lv=simulated?'good':GPSQ.level;
   el('dGps').className='dot '+(simulated?'sim':(lv==='unusable'?'err':lv==='poor'?'warn':'on'));
   el('lGps').textContent= simulated?'模擬定位'
-    : lv==='unusable'?'定位不堪用' : lv==='poor'?'定位品質不佳' : 'GPS 已定位';
+    : lv==='searching'?'搜尋 GPS 中'
+    : lv==='unusable'?(IS_MOBILE?'GPS 訊號弱':'定位不堪用') : lv==='poor'?(IS_MOBILE?'GPS 訊號弱':'定位品質不佳') : 'GPS 已定位';
   el('accTag').textContent= acc? '±'+Math.round(acc)+'m' : '';
   // 不可信就顯示 --。顯示一個假數字比顯示「不知道」更糟，
   // 因為使用者會拿它判斷自己有沒有超速。
@@ -2991,7 +3114,9 @@ function quickCam(kind){
   closeFabMenu();
   const pos=GPS.last;
   if(!pos){ toast('尚未取得 GPS 位置，無法加入測速點'); return; }
-  if(pos.speedOk===false&&GPSQ.level==='unusable'){
+  // 直接看誤差，不看 level：暖機期 level 是 searching，但誤差 900 公尺的點一樣不能存
+  const accNow=med(GPSQ.accs.slice(-4));
+  if(pos.speedOk===false&&(GPSQ.level==='unusable'||(accNow!=null&&accNow>150))){
     toast('定位品質不足，這個點會標得很不準 —— 建議停車後再用地圖選點',5200); return;
   }
   kind=kind||'測速點';
@@ -3536,6 +3661,11 @@ function bind(){
     if(b.dataset.v==='trip') renderTrip();
   });
   // gate
+  el('btnGpsRestart').onclick=restartGPS;
+  // 依裝置預先展開對應的說明
+  try{ if(/iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform||''))) el('gpsHelpIos').open=true;
+       else if(/Android/i.test(navigator.userAgent)) el('gpsHelpAndroid').open=true; }catch(e){}
+  setInterval(()=>{ if(el('v-set').classList.contains('active')) paintGpsCard(); },2000);
   el('btnStart').onclick=()=>{ Audio_.unlock(); startGPS(); el('gate').classList.add('hidden');
     setTimeout(()=>{ if(MAP)MAP.invalidateSize(); },100); Audio_.say('鹿豹已啟動，祝你行車平安'); };
   // 只看地圖也要常亮 —— 使用者要的是「開著這個網頁就不要休眠」，
@@ -3943,7 +4073,7 @@ function boot(){
              parseKmName,buildKmAnchors,kmEstimate,kmLock,kmToLatLon,kmChoices,KM,
              Native,startGPS,GPS,POWER,powerTick,powerEnter,powerExit,powerReset,
              WAKE,wakeAcquire,wakeRelease,paintWake,
-             GPSQ,gpsSample,gpsGrade,gpsResetQuality,deriveSpeed,sweptDist,paintGpsWarn,
+             GPSQ,gpsSample,gpsGrade,gpsResetQuality,paintGpsCard,restartGPS,IS_MOBILE,deriveSpeed,sweptDist,paintGpsWarn,
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
              kmAtPoint,cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
