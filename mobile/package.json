@@ -21,8 +21,7 @@
     "@capacitor/core": "^6.2.0",
     "@capacitor/ios": "^6.2.0",
     "@capacitor-community/background-geolocation": "^1.2.24",
-    "@capacitor-community/text-to-speech": "^5.0.0",
-    "@capacitor/keep-awake": "^6.0.0"
+    "@capacitor-community/text-to-speech": "^5.0.0"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
