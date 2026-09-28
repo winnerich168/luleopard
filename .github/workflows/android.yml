@@ -121,9 +121,14 @@ jobs:
       - name: 整理產出
         run: |
           mkdir -p out
-          find mobile/android -name "*.apk" -o -name "*.aab" | while read f; do
-            cp "$f" "out/$(basename "$f")"
-          done
+          # 有簽章的正式版就只放正式版（app-release.apk / .aab），避免使用者下載到 debug 版；
+          # intermediary-bundle.aab 是 Gradle 的中間產物，一律不放
+          if ls mobile/android/app/build/outputs/apk/release/*.apk >/dev/null 2>&1; then
+            cp mobile/android/app/build/outputs/apk/release/*.apk out/
+            cp mobile/android/app/build/outputs/bundle/release/*.aab out/ 2>/dev/null || true
+          else
+            cp mobile/android/app/build/outputs/apk/debug/*.apk out/
+          fi
           ls -la out
           echo "### 📦 建置產出" >> $GITHUB_STEP_SUMMARY
           ls -lh out | tail -n +2 | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
