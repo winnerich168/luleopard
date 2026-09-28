@@ -9,6 +9,7 @@
  * 冪等：跑幾次結果都一樣。缺任何必要設定就 exit 1，讓 CI 直接失敗而不是出貨。
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -87,6 +88,45 @@ const run = parseInt(process.env.GITHUB_RUN_NUMBER || '', 10);
 if (run > 0) setString('CFBundleVersion', String(run));
 
 writeFileSync(plistPath, p, 'utf8');
+
+/* ── 最低 iOS 版本 13 → 15 ──
+   Capacitor 6 產生的專案與各外掛預設 iOS 13。Xcode 27 起只支援 15 以上，
+   不改就整個編譯失敗（Xcode 26 還允許，所以雲端建置沒發現）。
+   iOS 15 是 2021 年的版本，實際上不影響任何還在用的 iPhone。
+   要改三處：App 專案、Podfile 的平台宣告、以及各外掛（Pods）自己的設定。 */
+const MIN_IOS = '15.0';
+const appDir = join(root, 'ios/App');
+const pbxPath = join(appDir, 'App.xcodeproj/project.pbxproj');
+if (existsSync(pbxPath)) {
+  const pbx = readFileSync(pbxPath, 'utf8');
+  const next = pbx.replace(/IPHONEOS_DEPLOYMENT_TARGET = 1[0-4]\.\d+;/g, `IPHONEOS_DEPLOYMENT_TARGET = ${MIN_IOS};`);
+  if (next !== pbx) { writeFileSync(pbxPath, next, 'utf8'); note('App 最低 iOS ' + MIN_IOS); }
+}
+const podPath = join(appDir, 'Podfile');
+if (existsSync(podPath)) {
+  let pod = readFileSync(podPath, 'utf8');
+  const before = pod;
+  pod = pod.replace(/platform :ios, '1[0-4]\.\d+'/, `platform :ios, '${MIN_IOS}'`);
+  const MARK = '# luleopard: 外掛最低 iOS 版本';
+  if (!pod.includes(MARK)) {
+    pod = pod.replace(/post_install do \|installer\|\n/, m => m +
+`  ${MARK}（Xcode 27 起不支援 15 以下）
+  installer.pods_project.targets.each do |t|
+    t.build_configurations.each do |c|
+      if c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < ${parseFloat(MIN_IOS)}
+        c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '${MIN_IOS}'
+      end
+    end
+  end
+`);
+  }
+  if (pod !== before) {
+    writeFileSync(podPath, pod, 'utf8'); note('Podfile 最低 iOS ' + MIN_IOS);
+    // Podfile 改了就要重跑 pod install，Pods 專案才會套用
+    try { execSync('pod install', { cwd: appDir, stdio: 'inherit' }); }
+    catch (e) { console.error('✗ pod install 失敗'); process.exit(1); }
+  }
+}
 
 /* ── 驗證 ── */
 const must = ['NSLocationWhenInUseUsageDescription', 'NSLocationAlwaysAndWhenInUseUsageDescription',
