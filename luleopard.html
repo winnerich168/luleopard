@@ -543,16 +543,13 @@ textarea{resize:vertical;min-height:74px}
       <div id="srcList"></div>
     </div>
     <div class="card">
-      <h3>🚦 即時路況來源 (TDX)</h3>
-      <div class="hint" style="margin-bottom:9px">TDX 需要免費註冊取得 Client ID / Secret。填入後即可在「路況」頁抓取即時事件。金鑰只存在這台裝置。</div>
-      <div class="row"><label>Client ID</label></div>
-      <input type="text" id="tdxId" placeholder="your-client-id" autocomplete="off">
-      <div class="row"><label>Client Secret</label></div>
-      <input type="password" id="tdxSecret" placeholder="your-client-secret" autocomplete="off">
-      <div class="row"><label>事件 API 路徑</label></div>
-      <input type="text" id="tdxPath">
-      <button class="btn wide primary" id="btnSaveTdx">儲存並測試連線</button>
-      <div class="hint" id="tdxStat" style="margin-top:8px"></div>
+      <h3>🚦 官方即時路況 <small>不用設定</small></h3>
+      <div class="hint" style="margin-bottom:6px">
+        由鹿豹的伺服器向交通部 TDX 取得<b>國道＋省道／快速道路</b>的事故、施工、壅塞、封閉，
+        每 10 分鐘更新，接近時以「官方通報」語音播報。金鑰放在伺服器上，手機不需要也不應該輸入任何金鑰。
+      </div>
+      <div class="row"><label>狀態</label><b id="offStat">尚未取得</b></div>
+      <div class="row"><label>附近官方事件</label><b id="offCount">—</b></div>
     </div>
   </div></section>
 
@@ -661,7 +658,7 @@ textarea{resize:vertical;min-height:74px}
           <b>地圖與路網</b>：© OpenStreetMap contributors，依
           <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> 使用；
           本 App 產出的路網衍生資料庫亦以 ODbL 授權釋出。<br>
-          <b>路況事件</b>：交通部 TDX 運輸資料流通服務（需自行申請金鑰）。<br>
+          <b>路況事件</b>：交通部 TDX 運輸資料流通服務（由鹿豹伺服器取得）。<br>
           <b>程式庫</b>：Leaflet 1.9.4（BSD-2-Clause）、fflate 0.8.2（MIT）。<br>
           <span style="opacity:.8">資料由各機關提供，本工具不保證其正確性、完整性或即時性。</span>
         </div>
@@ -760,9 +757,7 @@ const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:tru
            feedUrl:DATA_BASE+'speedcams.min.json',feedAuto:true,feedLast:0,feedCount:0,
            hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:DATA_BASE+'interchanges.min.json',icLast:0,
            powerSave:true,powerAfterMin:5,
-           roadUrl:'',roadCount:0,
-           tdxId:'',tdxSecret:'',
-           tdxPath:'https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/Freeway/Section?%24top=50&%24format=JSON'};
+           roadUrl:'',roadCount:0};
 let CFG=Object.assign({},DEF,Store.get(K('cfg'),{}));
 const saveCfg=()=>Store.set(K('cfg'),CFG);
 /* 舊版的預設是「資料源網址空白、不自動更新」，而且整份 CFG 都存進裝置裡，
@@ -773,6 +768,11 @@ if(!CFG.autoData1){
   if(!CFG.feedUrl){ CFG.feedUrl=DEF.feedUrl; CFG.feedAuto=true; }
   if(!CFG.icUrl) CFG.icUrl=DEF.icUrl;
   CFG.autoData1=1; saveCfg();
+}
+/* 以前設定頁可以填 TDX 金鑰、由手機直接連 TDX。現在改由後端代抓，
+   手機上留著金鑰沒有用處、還多一份外洩風險 —— 從裝置裡清掉。 */
+if('tdxId' in CFG||'tdxSecret' in CFG||'tdxPath' in CFG){
+  delete CFG.tdxId; delete CFG.tdxSecret; delete CFG.tdxPath; saveCfg();
 }
 /* 後端是之後才部署的，已經搬遷過的人也要補一次（同樣只補空白的） */
 if(!CFG.autoData2){
@@ -808,7 +808,7 @@ const SOURCES=[
  {g:'六都',n:'臺中市政府資料開放平臺',d:'搜尋「測速」',u:'https://opendata.taichung.gov.tw/search?q=測速',f:''},
  {g:'六都',n:'臺南市政府資料開放平臺',d:'搜尋「測速」',u:'https://data.tainan.gov.tw/dataset?q=測速',f:''},
  {g:'六都',n:'高雄市政府資料開放平臺',d:'測速照相桿／移動式測速地點',u:'https://data.kcg.gov.tw/dataset?q=測速',f:''},
- {g:'路況',n:'TDX 運輸資料流通服務',d:'即時路況、事件、CCTV，需免費註冊金鑰',u:'https://tdx.transportdata.tw/',f:''},
+ {g:'路況',n:'TDX 運輸資料流通服務',d:'官方即時路況來源（鹿豹伺服器已串接，使用者不用申請金鑰）',u:'https://tdx.transportdata.tw/',f:''},
  {g:'路況',n:'1968 即時路況（高公局）',d:'國道即時路況與事件官方網站',u:'https://1968.freeway.gov.tw/',f:''}
 ];
 
@@ -930,7 +930,6 @@ const savePacks=()=>{ try{ Store.set(K('packs'),PACKS); }
   catch(e){ toast('資料量太大，無法保存到這台裝置（本次仍可使用）',5000); } };
 let REPORTS=Store.get(K('reports'),[]);
 let BROADCASTS=Store.get(K('bc'),[]);
-let TRAFFIC=[];            // TDX 抓回來的即時事件
 
 function mkCam(lat,lon,lim,dir,name,src){
   return {id:src[0]+'_'+lat.toFixed(5)+'_'+lon.toFixed(5),lat,lon,lim:lim||0,dir:dir||'',
@@ -2137,45 +2136,27 @@ async function ingestZip(buf,label){
   return total;
 }
 
-/* ---------- 15. TDX 即時路況 ---------- */
-let tdxToken=null,tdxExp=0;
-async function tdxAuth(){
-  if(tdxToken&&Date.now()<tdxExp-60000) return tdxToken;
-  if(!CFG.tdxId||!CFG.tdxSecret) throw new Error('尚未填入 TDX 金鑰');
-  const r=await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token',{
-    method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},
-    body:new URLSearchParams({grant_type:'client_credentials',client_id:CFG.tdxId,client_secret:CFG.tdxSecret})});
-  if(!r.ok) throw new Error('取得 token 失敗 ('+r.status+')');
-  const j=await r.json();
-  tdxToken=j.access_token; tdxExp=Date.now()+(j.expires_in||86400)*1000;
-  return tdxToken;
-}
-async function fetchTraffic(silent){
-  el('tdxStat').textContent='連線中…';
-  try{
-    const tk=await tdxAuth();
-    const r=await fetch(CFG.tdxPath,{headers:{authorization:'Bearer '+tk,accept:'application/json'}});
-    if(!r.ok) throw new Error('API 回應 '+r.status);
-    const j=await r.json();
-    const arr=Array.isArray(j)?j:(j.LiveTraffics||j.Newses||j.Sections||j.data||j.Incidents||[]);
-    TRAFFIC=arr.slice(0,60).map(o=>({
-      title:o.Description||o.Title||o.SectionName||o.RoadName||JSON.stringify(o).slice(0,90),
-      meta:[o.RoadName,o.SectionName,o.CongestionLevel!=null?('壅塞 '+o.CongestionLevel):'',
-            o.TravelSpeed!=null?(o.TravelSpeed+' km/h'):''].filter(Boolean).join(' · '),
-      kind:'TDX', t:Date.now(), lat:o.PositionLat||o.Latitude, lon:o.PositionLon||o.Longitude }));
-    el('tdxStat').textContent='✅ 連線成功，取得 '+TRAFFIC.length+' 筆';
-    renderTraffic(); if(!silent) toast('已更新 '+TRAFFIC.length+' 筆即時路況');
-  }catch(e){
-    el('tdxStat').textContent='❌ '+e.message+'（瀏覽器直接呼叫可能被 CORS 擋下，正式版建議透過自己的後端代理）';
-    if(!silent) toast('路況取得失敗：'+e.message,4200);
+/* ---------- 15. 官方即時路況 ----------
+   以前是手機自己拿 TDX 金鑰直接呼叫（金鑰存在每支手機裡、還常被 CORS 擋）。
+   現在由後端（backend/worker.js）每 10 分鐘代抓，隨 /hazards 一起回傳，
+   在 HAZARDS 裡標成 src:'official'。這裡只記錄最近一次的狀態給設定頁顯示。 */
+const OFFICIAL={pulled:0,listT:0,near:0,err:''};
+function paintOfficial(){
+  const st=el('offStat'), ct=el('offCount'); if(!st) return;
+  if(OFFICIAL.err){ st.textContent='❌ '+OFFICIAL.err; }
+  else if(!OFFICIAL.pulled){ st.textContent= CFG.hazUrl? '開始導航後自動取得' : '未連線（沒有設定伺服器）'; }
+  else{
+    const ago=m=>m<1?'剛剛':Math.round(m)+' 分鐘前';
+    st.textContent='✅ '+(OFFICIAL.listT? '官方資料更新於 '+ago((Date.now()-OFFICIAL.listT)/60e3) : '已連線');
   }
+  if(ct) ct.textContent= OFFICIAL.pulled? OFFICIAL.near+' 筆（15 公里內）' : '—';
 }
 
 /* ---------- 16. 路況 / 播報 UI ---------- */
 const BC_KINDS=['事故','壅塞','施工','管制','天候','其他'];
 let bcKindSel='事故', trafficFilter='全部';
 function renderTrafficFilter(){
-  const opts=['全部','TDX','播報','回報'];
+  const opts=['全部','官方','播報','回報'];
   el('trafficFilter').innerHTML=opts.map(o=>
     `<button class="chip ${o===trafficFilter?'sel':''}" data-tf="${o}">${o}</button>`).join('');
 }
@@ -2185,7 +2166,11 @@ function allTrafficItems(){
                   .map(r=>({title:r.kind+(r.note?' · '+r.note:''),
                             meta:r.lat.toFixed(4)+', '+r.lon.toFixed(4)+' · '+new Date(r.t).toLocaleString('zh-TW',{hour12:false}),
                             kind:'回報',t:r.t}));
-  return TRAFFIC.concat(bc,rp).sort((a,b)=>(b.t||0)-(a.t||0));
+  // 官方事件：後端代抓的 TDX，存在 HAZARDS 裡
+  const off=HAZARDS.filter(h=>h.src==='official'&&h.expires>Date.now())
+                   .map(h=>({title:h.type+(h.road?' · '+h.road+(h.dir?' '+h.dir:'')+(h.km!=null?' '+h.km+'K':''):''),
+                             meta:h.note||'',kind:'官方',t:h.t}));
+  return off.concat(bc,rp).sort((a,b)=>(b.t||0)-(a.t||0));
 }
 function renderTraffic(){
   const items=allTrafficItems().filter(i=>trafficFilter==='全部'||i.kind===trafficFilter);
@@ -2193,7 +2178,7 @@ function renderTraffic(){
   el('trafficList').innerHTML= items.length? items.map(i=>
     `<div class="item"><div class="t">${esc(i.title)}</div>
      <div class="m"><span class="tag ${i.kind==='回報'?'usr':''}">${esc(i.kind)}</span> ${esc(i.meta||'')}</div></div>`).join('')
-    : '<div class="empty">目前沒有路況。<br>可設定 TDX 金鑰抓即時資料，或在下方手動輸入聽到的廣播。</div>';
+    : '<div class="empty">附近目前沒有路況。<br>官方事件會在開始導航後自動取得；也可以在下方手動輸入聽到的廣播。</div>';
 }
 function renderBcKinds(){
   el('bcKind').innerHTML=BC_KINDS.map(k=>`<button class="chip ${k===bcKindSel?'sel':''}" data-bc="${k}">${k}</button>`).join('');
@@ -2500,7 +2485,7 @@ const HAZ_TYPES=[
   {k:'動物',    i:'🐕', sev:2, ttl:1*3600e3},
   {k:'臨檢',    i:'👮', sev:1, ttl:3*3600e3},
 ];
-/* 不在一鍵回報選單裡、只會從 TDX 進來的類型 */
+/* 不在一鍵回報選單裡、只會從官方事件（後端代抓的 TDX）進來的類型 */
 const HAZ_EXTRA=[
   {k:'道路管制',i:'⛔', sev:2, ttl:3*3600e3},
   {k:'道路災害',i:'⛰️', sev:3, ttl:6*3600e3},
@@ -2563,21 +2548,10 @@ function hazTiers(h,v){
  * 其他來源的路況，一律轉成 HAZARDS 的格式一起評估、一起播報。
  * 以前只有「一鍵回報」和後端拉回來的 HAZARDS 會唸；
  * 從「回報」頁在地圖上點選新增的事故／施工／坑洞（存在 REPORTS），
- * 以及 TDX 抓回來、有座標的即時事件，都只會列在清單裡，開到旁邊也不出聲。
+ * 都只會列在清單裡，開到旁邊也不出聲。（官方事件由後端代抓，本來就在 HAZARDS 裡）
  * id 要穩定，hazState 才記得住「已經唸到第幾級」，不會每一筆定位都重唸。
  */
 const REP_HAZ={'事故':'事故','施工':'施工','坑洞':'路面坑洞'};
-function tdxHazType(t){
-  t=String(t||'');
-  if(/事故|車禍|追撞|碰撞|翻覆/.test(t)) return '事故';
-  if(/故障|拋錨/.test(t)) return '車輛故障';
-  if(/掉落|散落|落物/.test(t)) return '掉落物';
-  if(/施工|維修|工程/.test(t)) return '施工';
-  if(/壅塞|回堵|車多|塞車/.test(t)) return '塞車';
-  if(/積水|淹水/.test(t)) return '積水';
-  if(/管制|封閉|封路/.test(t)) return '道路管制';
-  return '路況事件';
-}
 function extraHazards(now){
   const out=[];
   for(const r of REPORTS){
@@ -2586,15 +2560,6 @@ function extraHazards(now){
     if(r.t+ttl<=now) continue;
     out.push({id:'rp_'+r.id,type,lat:r.lat,lon:r.lon,road:'',roadClass:'一般道路',km:null,lane:'',
               brg:null,t:r.t,lastReport:r.t,expires:r.t+ttl,confirms:0,reports:1,note:r.note||''});
-  }
-  for(const o of TRAFFIC){
-    const la=+o.lat, lo=+o.lon;
-    if(!isFinite(la)||!isFinite(lo)||!la||!lo) continue;
-    const type=tdxHazType(o.title+' '+(o.meta||''));
-    const fast=/國道|國\d|快速道路|台6[1-8]|高架/.test(o.title+' '+(o.meta||''));
-    out.push({id:'tdx_'+la.toFixed(5)+'_'+lo.toFixed(5)+'_'+type,type,lat:la,lon:lo,road:'',
-              roadClass:fast?'國道':'一般道路',km:null,lane:'',brg:null,
-              t:o.t,lastReport:o.t,expires:o.t+hazMeta(type).ttl,confirms:0,reports:1,official:'open'});
   }
   return out;
 }
@@ -2868,9 +2833,14 @@ async function pullHazards(pos,silent){
     HAZARDS=HAZARDS.filter(h=>h.mine).concat(remote);
     saveHazards(); renderHazards(); drawHazLayer(); renderTraffic();
     CFG.hazLast=Date.now(); saveCfg();
-    if(!silent) toast('已取得附近 '+remote.length+' 筆回報');
+    OFFICIAL.pulled=Date.now(); OFFICIAL.err='';
+    OFFICIAL.listT=j.officialT||0; OFFICIAL.near=remote.filter(h=>h.src==='official').length;
+    paintOfficial();
+    if(!silent) toast('已取得附近 '+remote.length+' 筆路況（官方 '+OFFICIAL.near+' 筆）');
     return remote.length;
-  }catch(e){ if(!silent) toast('取得回報失敗：'+e.message,4000); return -1; }
+  }catch(e){
+    OFFICIAL.err='連不上伺服器（'+e.message+'）'; paintOfficial();
+    if(!silent) toast('取得路況失敗：'+e.message,4000); return -1; }
 }
 
 /* ---------- 17f. 照片 EXIF 取座標（不保存照片） ---------- */
@@ -3740,10 +3710,10 @@ function bind(){
     const s=SOURCES[+b.dataset.fetch]; doFetch(s.f,s.n); };
 
   // TDX
-  el('tdxId').value=CFG.tdxId; el('tdxSecret').value=CFG.tdxSecret; el('tdxPath').value=CFG.tdxPath;
-  el('btnSaveTdx').onclick=()=>{ CFG.tdxId=el('tdxId').value.trim(); CFG.tdxSecret=el('tdxSecret').value.trim();
-    CFG.tdxPath=el('tdxPath').value.trim()||DEF.tdxPath; saveCfg(); tdxToken=null; fetchTraffic(); };
-  el('btnRefreshTraffic').onclick=()=>{ if(CFG.tdxId) fetchTraffic(); else { renderTraffic(); toast('尚未設定 TDX 金鑰，僅顯示手動播報與回報'); } };
+  el('btnRefreshTraffic').onclick=async()=>{
+    if(CFG.hazUrl&&GPS.last){ await pullHazards(GPS.last,false); }
+    else toast(GPS.last?'沒有設定伺服器，僅顯示手動播報與回報':'尚未定位，開始導航後才會取得附近的官方路況');
+    renderTraffic(); };
 
   // 播報
   el('bcKind').onclick=e=>{ const b=e.target.closest('[data-bc]'); if(!b)return; bcKindSel=b.dataset.bc; renderBcKinds(); };
@@ -4000,10 +3970,10 @@ async function doFetch(url,label){
  * 自動載入／更新線上資料。全部靜默進行，失敗就沿用上次成功的版本，完全不影響離線使用。
  *   測速點  每 6 小時檢查一次（來源每週更新；抓的是 194 KB 的精簡檔）
  *   交流道  沒有資料就立刻抓，之後每 7 天更新
- *   TDX     有填金鑰才抓，每 5 分鐘一次 —— 唯一真正「即時」的來源
+ * （官方即時路況由後端代抓，隨共享回報每 3 分鐘一起拉回來，不在這裡）
  * 用 file:// 直接開檔（本機開發、測試）時不自動連網。
  */
-const AUTO={busy:false,tdxLast:0};
+const AUTO={busy:false};
 async function autoData(){
   if(AUTO.busy) return;
   if(location.protocol==='file:'&&!Native.isNative) return;
@@ -4016,17 +3986,13 @@ async function autoData(){
       try{ const n=await icFetch(CFG.icUrl); icStatus('✅ 已自動載入 '+n+' 個交流道'); }
       catch(e){ if(!IC.loaded) icStatus('自動載入失敗：'+e.message+'（有網路時會再試）'); }
     }
-    if(CFG.tdxId&&CFG.tdxSecret&&now-AUTO.tdxLast>5*60e3){
-      AUTO.tdxLast=now;
-      await fetchTraffic(true);
-    }
   }finally{ AUTO.busy=false; }
 }
 
 /* ---------- 20. 啟動 ---------- */
 function boot(){
   initMap(); bind();
-  renderSources(); renderBcKinds(); renderRepKinds(); renderTrafficFilter();
+  renderSources(); renderBcKinds(); paintOfficial(); renderRepKinds(); renderTrafficFilter();
   rebuildDB(); renderReports(); renderTraffic(); paintAlert(null);
   HAZARDS=HAZARDS.filter(h=>h.expires>Date.now());
   buildKmAnchors(); renderHazKinds(); renderHazards(); renderKm(); drawHazLayer();
@@ -4083,7 +4049,7 @@ function boot(){
              passedCams,announcePassed,
              IC,loadInterchanges,icTick,icStatus,
              hazScore,scoreLabel,SCORE_SPEAK,SCORE_SHOW,HALF_LIFE,
-             hazTiers,roadSpeak,evaluateHazards,extraHazards,tdxHazType,preDist,PRE,Audio_,setTraffic:a=>{TRAFFIC=a;},addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
+             hazTiers,roadSpeak,evaluateHazards,extraHazards,preDist,PRE,Audio_,OFFICIAL,paintOfficial,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
              REPORTS:()=>REPORTS,setReports:a=>{REPORTS=a;Store.set(K('reports'),REPORTS);rebuildDB();},
              HAZARDS:()=>HAZARDS,setHazards:a=>{HAZARDS=a;},hazState,pullHazards,voteHazard,isFastRoad,
              retractHazard,probeTick,sendProbe,cruiseSpeed,cruiseSample,PROBE,

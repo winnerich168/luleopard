@@ -284,6 +284,7 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
   const q = await call2('GET', `/hazards?lat=${acc.lat - 2000 / 111320}&lon=${acc.lon}&r=15000`);
   const oa = q.body.hazards.find(h => h.id === acc.id);
   t('查附近時會附上官方事件', !!oa && q.body.official >= 1, q.body);
+  t('回傳官方清單的更新時間', typeof q.body.officialT === 'number' && Date.now() - q.body.officialT < 60e3, q.body.officialT);
   t('官方事件標記為 official', oa && oa.official === 'open' && oa.src === 'official');
   t('南向 → 方位角 180', oa && oa.brg === 180);
   t('方向容許角放寬（彎道不漏報）', oa && oa.brgTol === 110);

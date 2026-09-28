@@ -220,8 +220,9 @@ async function handleQuery(env, url) {
     .map(x => ({ ...publicShape(x.h), dist: Math.round(x.d) }));
 
   const off = await officialNear(env, lat, lon, r, near, now);
-  const merged = near.concat(off).sort((a, b) => a.dist - b.dist).slice(0, 200);
-  return json({ ok: true, now, count: merged.length, official: off.length, hazards: merged });
+  const merged = near.concat(off.list).sort((a, b) => a.dist - b.dist).slice(0, 200);
+  // officialT：官方清單是什麼時候抓的，App 設定頁顯示「官方資料更新於 N 分鐘前」
+  return json({ ok: true, now, count: merged.length, official: off.list.length, officialT: off.t, hazards: merged });
 }
 
 async function handleReport(env, req) {
@@ -568,7 +569,7 @@ async function reconcile(env) {
  */
 async function officialNear(env, lat, lon, r, userHazards, now) {
   const o = await Store.meta(env, OFFICIAL_KEY);
-  if (!o || !Array.isArray(o.items) || now - o.t > OFFICIAL_STALE_MS) return [];
+  if (!o || !Array.isArray(o.items) || now - o.t > OFFICIAL_STALE_MS) return { list: [], t: 0 };
   const out = [];
   for (const x of o.items) {
     const d = distM(lat, lon, x.lat, x.lon);
@@ -590,7 +591,7 @@ async function officialNear(env, lat, lon, r, userHazards, now) {
       dist: Math.round(d),
     });
   }
-  return out;
+  return { list: out, t: o.t };
 }
 
 export default {

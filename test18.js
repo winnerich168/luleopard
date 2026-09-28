@@ -66,9 +66,10 @@ const fs = require('fs');
       roadClass: '國道', km: 50.2, brg: 0, mine: false })]);
     // 回報頁新增的施工（REPORTS）
     LP.setReports([{ id: 'r1', lat: lat0 + 4500 * M, lon: lon0, kind: '施工', lim: 0, note: '', t: Date.now() }]);
-    // TDX 即時事件
-    LP.setTraffic([{ title: '國道1號北向 事故 占用內側車道', meta: '', kind: 'TDX', t: Date.now(),
-      lat: lat0 + 7500 * M, lon: lon0 }]);
+    // 官方即時事件（後端代抓的 TDX，拉回來後在 HAZARDS 裡標 src:'official'）
+    LP.setHazards(LP.HAZARDS().concat([LP.makeHazard({ id: 'o-test1', type: '事故', lat: lat0 + 7500 * M, lon: lon0,
+      road: '國道一號', roadClass: '國道', dir: '北向', km: 30.5, brg: 0, brgTol: 110,
+      official: 'open', src: 'official', mine: false })]));
   }, M);
 
   const v = 27.8;                          // 時速 100，每秒一筆定位
@@ -103,7 +104,7 @@ const fs = require('fs');
   ok('一鍵回報的事故有播報', done.some(t => /事故，國道1號/.test(t)));
   ok('回報頁的施工有播報', done.some(t => /施工/.test(t)));
   ok('回報頁的施工從遠到近', done.some(t => /^前方\d+公尺，注意施工/.test(t)) && done.some(t => /^施工就在前方/.test(t)));
-  ok('TDX 事件有播報', done.filter(t => /事故就在前方/.test(t)).length >= 2);
+  ok('官方事件有播報', done.some(t => /官方通報/.test(t)) && done.filter(t => /事故就在前方/.test(t)).length >= 2);
   ok('遠距預告只唸一次', done.filter(t => /^前方[\d.]+公里有測速照相/.test(t)).length === 1);
   ok('沒有頁面錯誤', errs.length === 0);
 

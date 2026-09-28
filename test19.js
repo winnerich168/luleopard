@@ -83,10 +83,13 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
 
   /* 2. 舊使用者：裝置裡存著「網址空白、自動更新關閉」的舊設定 */
   {
-    const { page, errs } = await open(browser, { legacyCfg: { feedUrl: '', feedAuto: false, icUrl: '', voice: true } });
+    const { page, errs } = await open(browser, { legacyCfg: { feedUrl: '', feedAuto: false, icUrl: '', voice: true,
+      tdxId: 'old-id', tdxSecret: 'old-secret', tdxPath: 'https://x' } });
     R.舊使用者 = await page.evaluate(() => ({
       點數: LP.CAMS().length, 交流道: LP.IC.items.length,
-      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl, hazUrl: LP.CFG.hazUrl }));
+      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl, hazUrl: LP.CFG.hazUrl,
+      舊金鑰已清除: !('tdxId' in LP.CFG) && !/old-secret/.test(localStorage.getItem('lp.cfg')),
+      沒有金鑰輸入欄: !document.getElementById('tdxId') && !document.getElementById('tdxSecret') }));
     R.舊使用者.errors = errs;
     await page.context().close();
   }
@@ -116,7 +119,8 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
         id: 'o-abc123', type: '事故', lat, lon, road: '國道三號', roadClass: '國道', dir: '南向', km: 410.1,
         brg: 180, brgTol: 110, note: '國道三號 南向 410K+100 交通事故-事故', lane: '',
         t: Date.now(), lastReport: Date.now(), expires: Date.now() + 20 * 60e3,
-        confirms: 0, clears: 0, reports: 1, score: 1.5, official: 'open', src: 'official', dist: 3000 }] }) }));
+        confirms: 0, clears: 0, reports: 1, score: 1.5, official: 'open', src: 'official', dist: 3000 }],
+        officialT: Date.now() - 4 * 60e3 }) }));
     R.官方事件 = await page.evaluate(async ([lat, lon, M]) => {
       LP.CFG.useSeed = false; LP.clearPacks(); LP.resetTrip();
       const n = await LP.pullHazards({ lat: lat + 4000 * M, lon }, true);
@@ -135,7 +139,11 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
         LP.onPos(lat - d * M, lon, 0, v, 5, false);
         await new Promise(r => setTimeout(r, 30));
       }
-      return { 拉回筆數: n, 有官方標記: !!h && h.official === 'open' && h.src === 'official' && h.brgTol === 110,
+      LP.paintOfficial();
+      const 設定頁 = { 狀態: document.getElementById('offStat').textContent, 筆數: document.getElementById('offCount').textContent };
+      document.querySelector('[data-tf="官方"]').click();
+      const 路況頁 = [...document.querySelectorAll('#trafficList .item .t')].map(e => e.textContent);
+      return { 設定頁, 路況頁, 拉回筆數: n, 有官方標記: !!h && h.official === 'open' && h.src === 'official' && h.brgTol === 110,
                南下語音: saidSouth.filter(t => /事故/.test(t)), 北上語音: window.__said.filter(t => /事故/.test(t)) };
     }, [lat, lon, M]);
     R.官方事件.errors = errs;
@@ -158,6 +166,11 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
   ok('預設連上共享回報後端', R.新使用者.hazUrl === API);
   ok('舊使用者也補上後端', R.舊使用者.hazUrl === API);
   ok('file:// 不預設後端', R.本機開檔.hazUrl === '');
+  ok('舊版存在手機裡的 TDX 金鑰會被清掉', R.舊使用者.舊金鑰已清除);
+  ok('設定頁沒有 TDX 金鑰輸入欄', R.舊使用者.沒有金鑰輸入欄);
+  ok('設定頁顯示官方路況已連線與更新時間', /✅/.test(R.官方事件.設定頁.狀態) && /4 分鐘前/.test(R.官方事件.設定頁.狀態));
+  ok('設定頁顯示附近官方事件筆數', /^1 筆/.test(R.官方事件.設定頁.筆數));
+  ok('路況頁列得出官方事件', R.官方事件.路況頁.some(t => /事故/.test(t) && /國道三號/.test(t)));
   ok('官方事件拉得回來且保留官方標記', R.官方事件.拉回筆數 === 1 && R.官方事件.有官方標記);
   ok('官方事件從遠到近播報', R.官方事件.南下語音.length >= 2 && /事故就在前方/.test(R.官方事件.南下語音.at(-1)));
   ok('播報說得出是官方通報', R.官方事件.南下語音.some(t => /官方通報/.test(t)));
