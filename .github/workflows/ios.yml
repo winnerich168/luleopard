@@ -1,0 +1,122 @@
+name: 建置 iOS App（TestFlight）
+
+# 兩個階段，由有沒有設定 Apple 金鑰自動決定：
+#   · 還沒設定 → 只做「編譯檢查」（不簽章），確保專案能編得過
+#   · 已設定   → 簽章、封存、直接上傳到 App Store Connect，處理完就會出現在 TestFlight
+#
+# 需要的 GitHub secrets（Apple 開發者帳號核准後才拿得到）：
+#   APPLE_TEAM_ID        開發者帳號的 Team ID（10 碼）
+#   ASC_KEY_ID           App Store Connect API 金鑰的 Key ID
+#   ASC_ISSUER_ID        App Store Connect API 的 Issuer ID
+#   ASC_KEY_P8_BASE64    下載的 AuthKey_XXXX.p8 檔，base64 編碼
+# API 金鑰的角色要選「管理（Admin）」：雲端自動簽章需要建立發佈憑證。
+#
+# 公開 repo 的 GitHub Actions（含 macOS）免費。
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 選用 Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: 安裝相依套件
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+
+      - name: 產生 www/ 與 iOS 專案
+        working-directory: mobile
+        run: |
+          npm run prepare:www
+          # ios/ 不進版控（產出物），每次重新產生
+          npx cap add ios
+          node scripts/make-resources.mjs
+          npx @capacitor/assets generate --ios \
+            --iconBackgroundColor '#0b0f14' \
+            --splashBackgroundColor '#0b0f14' || echo "⚠ 圖示產生失敗，用預設圖示繼續"
+          npx cap sync ios
+
+      - name: 補上背景定位與背景語音設定
+        working-directory: mobile
+        run: node scripts/patch-ios.mjs
+
+      - name: 檢查有沒有 Apple 金鑰
+        id: keys
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          KID: ${{ secrets.ASC_KEY_ID }}
+          ISS: ${{ secrets.ASC_ISSUER_ID }}
+          P8: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          if [ -n "$TEAM" ] && [ -n "$KID" ] && [ -n "$ISS" ] && [ -n "$P8" ]; then
+            echo "ready=true" >> $GITHUB_OUTPUT
+            mkdir -p ~/.appstoreconnect/private_keys
+            echo "$P8" | base64 -d > ~/.appstoreconnect/private_keys/AuthKey_$KID.p8
+            echo "✓ 有 Apple 金鑰：會簽章並上傳到 TestFlight"
+          else
+            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "⚠ 還沒設定 Apple 金鑰：只做編譯檢查，不上傳"
+          fi
+
+      - name: 編譯檢查（不簽章）
+        if: steps.keys.outputs.ready != 'true'
+        working-directory: mobile/ios/App
+        run: |
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build | tail -30
+          echo "### ✓ iOS 編譯通過（尚未設定 Apple 金鑰，沒有上傳）" >> $GITHUB_STEP_SUMMARY
+
+      - name: 封存並上傳到 TestFlight
+        if: steps.keys.outputs.ready == 'true'
+        working-directory: mobile/ios/App
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          KID: ${{ secrets.ASC_KEY_ID }}
+          ISS: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          KEY=~/.appstoreconnect/private_keys/AuthKey_$KID.p8
+          AUTH="-allowProvisioningUpdates -authenticationKeyPath $KEY -authenticationKeyID $KID -authenticationKeyIssuerID $ISS"
+
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath $RUNNER_TEMP/App.xcarchive \
+            DEVELOPMENT_TEAM=$TEAM CODE_SIGN_STYLE=Automatic \
+            $AUTH archive | tail -30
+
+          # destination=upload：匯出的同時直接上傳到 App Store Connect，不用另外的上傳工具
+          cat > $RUNNER_TEMP/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+
+          xcodebuild -exportArchive -archivePath $RUNNER_TEMP/App.xcarchive \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -exportPath $RUNNER_TEMP/export $AUTH | tail -30
+
+          echo "### ✓ 已上傳到 App Store Connect" >> $GITHUB_STEP_SUMMARY
+          echo "Apple 處理約 10～30 分鐘後會出現在 TestFlight。" >> $GITHUB_STEP_SUMMARY
+
+      - name: 清掉金鑰
+        if: always()
+        run: rm -rf ~/.appstoreconnect
