@@ -38,6 +38,9 @@ jobs:
           java-version: "21"        # Capacitor 6 + AGP 8 需要 JDK 17 以上
 
       - uses: android-actions/setup-android@v3
+        with:
+          # 預設會裝 'tools'，這個套件 Google 已經下架，sdkmanager 會直接失敗
+          packages: platform-tools
 
       # node_modules 與 Gradle 快取，第二次之後會快很多
       - uses: actions/cache@v4
