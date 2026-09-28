@@ -71,6 +71,22 @@ if (!mf.includes(SERVICE_CLASS)) {
 }
 writeFileSync(mfPath, mf, 'utf8');
 
+/* ═══════════ 1b. 版本號 ═══════════
+   cap add android 產生的是 versionCode 1 / versionName "1.0"，每次建置都一樣。
+   Android 靠 versionCode 判斷新舊：比已安裝的小就拒絕安裝。
+   CI 用 GitHub 的建置次數當 versionCode（只增不減），versionName 跟網頁版同一個版號。 */
+const gradlePath = join(android, 'app/build.gradle');
+if (existsSync(gradlePath)) {
+  let g = readFileSync(gradlePath, 'utf8');
+  const rootPkg = JSON.parse(readFileSync(resolve(root, '..', 'package.json'), 'utf8'));
+  const vName = rootPkg.version || '1.0';
+  const vCode = parseInt(process.env.GITHUB_RUN_NUMBER || '', 10);
+  const before = g;
+  g = g.replace(/versionName\s+"[^"]*"/, `versionName "${vName}"`);
+  if (vCode > 0) g = g.replace(/versionCode\s+\d+/, `versionCode ${vCode}`);
+  if (g !== before) { writeFileSync(gradlePath, g, 'utf8'); note(`版本 ${vName}` + (vCode > 0 ? `（versionCode ${vCode}）` : '')); }
+}
+
 /* ═══════════ 2. strings.xml：App 名稱 ═══════════ */
 const strPath = join(android, 'app/src/main/res/values/strings.xml');
 if (existsSync(strPath)) {

@@ -32,9 +32,21 @@ if (!html.includes(tag)) {
   html = html.replace('</head>', '  ' + tag + '\n</head>');
 }
 
+// 建置序號：跟網頁版（scripts/build-pages.mjs）同一個格式，台灣時間 YYYYMMDD.HHmm。
+// 沒蓋的話 App 會一直顯示原始檔裡的舊序號，使用者回報問題時分不出是哪一版。
+const tw = new Date(Date.now() + 8 * 3600e3);
+const p2 = n => String(n).padStart(2, '0');
+const BUILD = `${tw.getUTCFullYear()}${p2(tw.getUTCMonth() + 1)}${p2(tw.getUTCDate())}`
+            + `.${p2(tw.getUTCHours())}${p2(tw.getUTCMinutes())}`;
+const stamped = html.replace(/const APP_BUILD='[^']*';/, `const APP_BUILD='${BUILD}';`);
+if (stamped === html && !html.includes(`const APP_BUILD='${BUILD}';`)) {
+  console.error('✗ 找不到 APP_BUILD，無法蓋上建置序號'); process.exit(1);
+}
+html = stamped;
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(out, html, 'utf8');
 
 const kb = (Buffer.byteLength(html, 'utf8') / 1024).toFixed(0);
-console.log(`✓ www/index.html 已更新（${kb} KB）`);
+console.log(`✓ www/index.html 已更新（${kb} KB）· 建置序號 ${BUILD}`);
 console.log('  接著執行：npx cap sync');
