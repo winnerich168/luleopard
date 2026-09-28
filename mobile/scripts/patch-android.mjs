@@ -46,17 +46,26 @@ for (const [p, why] of PERMS) {
 }
 if (addPerm) { mf = mf.replace('</manifest>', addPerm + '</manifest>'); note('定位／前景服務／通知權限'); }
 
+// tools:replace 需要 tools 命名空間；cap add android 產生的 manifest 沒有
+if (!mf.includes('xmlns:tools=')) {
+  mf = mf.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ');
+  note('manifest 加上 tools 命名空間');
+}
+
 // 背景定位外掛的前景服務。沒有這段，App 一退到背景就被系統殺掉。
 const SERVICE_CLASS = 'com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService';
 if (!mf.includes(SERVICE_CLASS)) {
   mf = mf.replace('</application>',
 `        <!-- 背景定位的前景服務。foregroundServiceType 一定要是 location，
-             Android 14 以上少了它會直接崩潰而不是安靜失效。 -->
+             Android 14 以上少了它會直接崩潰而不是安靜失效。
+             外掛自己的 manifest 把 exported 設成 true，跟這裡衝突會讓建置直接失敗；
+             用 tools:replace 以這裡為準 —— 服務只給自己的 App 用，不必開放給別的 App。 -->
         <service
             android:name="${SERVICE_CLASS}"
             android:foregroundServiceType="location"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="false"
+            tools:replace="android:exported" />
     </application>`);
   note('背景定位前景服務宣告');
 }
