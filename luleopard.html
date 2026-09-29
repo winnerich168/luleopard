@@ -734,7 +734,7 @@ const K=k=>'lp.'+k;
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.9.1';
+const APP_VER='v1.9.2';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -3345,14 +3345,18 @@ function parseSection(name){
 
 /** 目前正在進行中的區間測速 */
 let SECTION=null;
+const secApproach=new Map();   // 接近中的區間起點：camId -> 目前最近距離
 /* SECTION = {cam, lengthM, limit, startT, distM, lastLat, lastLon, warned, name} */
 
 function sectionEnter(cam,pos){
   const info=parseSection(cam.name);
+  // 偵測到時通常已經開過起點幾十公尺：把這段距離與時間補回去，讓起點精準落在照相的位置
+  const past=dist(pos.lat,pos.lon,cam.lat,cam.lon), v=pos.speed||0;
+  const back= v>2? Math.min(past/v,30)*1000 : 0;
   SECTION={cam, name:cam.name, limit:cam.lim||0,
            lengthM: info? info.lengthM : null,
            range: info? (info.fromKm+'K → '+info.toKm+'K') : '',
-           startT:Date.now(), distM:0, lastLat:pos.lat, lastLon:pos.lon,
+           startT:Date.now()-back, distM: back? past : 0, lastLat:pos.lat, lastLon:pos.lon,
            warned:false, over:false};
   const km=SECTION.lengthM? (SECTION.lengthM/1000).toFixed(1)+'公里' : '';
   Audio_.say('進入區間測速'+(km?('，全長'+km):'')+(cam.lim?('，速限'+cam.lim):''));
@@ -3380,8 +3384,11 @@ function sectionUpdate(pos){
     if(SECTION.distM>SECTION.lengthM*1.8) return sectionExit(false);
   } else if(SECTION.distM>30000) return sectionExit(false);         // 沒長度資訊時的保險
 
-  // 平均已經超速 → 提醒一次；之後每降回安全再超速才會再提醒
-  if(SECTION.limit>0){
+  // 平均已經超速 → 提醒一次；之後每降回安全再超速才會再提醒。
+  // 至少開 500 公尺（長區間用全長的 15%）才判斷：才開 20 公尺的「平均」只是當下車速，
+  // 以前一進區間就說「平均 73 已超速」，其實後面放慢就不會超。
+  const judgeM=Math.max(500,(SECTION.lengthM||0)*0.15);
+  if(SECTION.limit>0&&SECTION.distM>=judgeM){
     if(SECTION.avg>SECTION.limit+1&&!SECTION.warned){
       SECTION.warned=true; SECTION.over=true;
       Audio_.say('注意，區間平均時速'+Math.round(SECTION.avg)+'，已超過速限'+SECTION.limit);
@@ -3458,15 +3465,22 @@ function updateTrip(pos){
   // 區間測速進出
   if(SECTION) sectionUpdate(pos);
   else {
+    /* 起點要算在「開過起點那一刻」。以前進入 150 公尺範圍就開始算，
+       等於提早 100 多公尺起算、終點也提早結束，平均時速跟官方算的對不起來。
+       現在接近時記下最近距離，距離開始拉開 = 剛開過起點，才進入區間。 */
     for(const c of CAMS){
       if(!c.sec) continue;
-      if(Math.abs(c.lat-pos.lat)>0.003||Math.abs(c.lon-pos.lon)>0.004) continue;
+      if(Math.abs(c.lat-pos.lat)>0.003||Math.abs(c.lon-pos.lon)>0.004){ secApproach.delete(c.id); continue; }
       if(!dirMatch(c,pos.heading)) continue;
-      if(dist(pos.lat,pos.lon,c.lat,c.lon)<150&&v>2){
-        // 這趟已經跑過同一個區間就不重複起算
-        if(!TRIP.sections.some(s=>s.name===c.name&&Date.now()-s.t<20*60e3)){
-          sectionEnter(c,pos); break;
-        }
+      const d=dist(pos.lat,pos.lon,c.lat,c.lon);
+      if(d>=150||v<=2){ secApproach.delete(c.id); continue; }
+      const m=secApproach.has(c.id)? secApproach.get(c.id) : Infinity;
+      if(d<m){ secApproach.set(c.id,d); if(d>15) continue; }   // 還在接近；15 公尺內直接算到了
+      else if(d<m+5) continue;                                  // 定位抖動，不算拉開
+      secApproach.delete(c.id);
+      // 這趟已經跑過同一個區間就不重複起算
+      if(!TRIP.sections.some(s=>s.name===c.name&&Date.now()-s.t<20*60e3)){
+        sectionEnter(c,pos); break;
       }
     }
   }
@@ -4066,7 +4080,7 @@ function boot(){
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
              kmAtPoint,cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
-             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();IC.said.clear();IC.lastAt=0;},camMin,updateTrip,
+             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();secApproach.clear();SECTION=null;IC.said.clear();IC.lastAt=0;},camMin,updateTrip,
              upcomingCams,renderTrip,fmtKm,fmtDur,
              openFabMenu,closeFabMenu,armFabMenu,fabMenuOpen,FAB_MENU_MS,
              passedCams,announcePassed,
