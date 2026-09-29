@@ -51,6 +51,11 @@ button{font-family:inherit;color:inherit;background:none;border:none;cursor:poin
 .gpswarn{margin-top:7px;padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.5;border:1px solid}
 .gpswarn.warn{background:#3a3110;border-color:var(--warn);color:#ffe6a8}
 .gpswarn.bad{background:#3f1616;border-color:var(--danger);color:#ffd0d0}
+.updbar{margin-top:7px;padding:9px 10px;border-radius:8px;font-size:13px;font-weight:700;display:flex;
+  align-items:center;gap:8px;background:#10301f;border:1px solid #2fd07a;color:#c9f5dc;cursor:pointer}
+.updbar.hidden{display:none}
+.updbar span{flex:1}
+.updbar button{background:none;border:0;color:inherit;font-size:15px;padding:0 4px;cursor:pointer}
 .gpswarn.info{background:#0f2536;border-color:var(--info);color:#cfe8ff}
 .gpsstate{font-weight:700}
 .gpsstate.ok{color:#2fd07a}.gpsstate.warn{color:var(--warn)}.gpsstate.bad{color:var(--danger)}
@@ -287,6 +292,8 @@ textarea{resize:vertical;min-height:74px}
     <span class="betabadge sm" id="hudBadge" title="公測版">公測</span>
     <span id="hudBuild" class="buildno"></span>
   </div>
+  <!-- 有新版：點一下就更新 -->
+  <div id="updBar" class="updbar hidden"><span id="updTx"></span><button id="updClose" aria-label="關閉">✕</button></div>
   <!-- 定位品質警告：只有在真的不堪用時才出現。安靜地假裝在工作是最糟的壞法。 -->
   <div id="gpsWarn" class="gpswarn hidden">
     <div id="gpsWarnTitle"></div>
@@ -648,6 +655,8 @@ textarea{resize:vertical;min-height:74px}
       <h3>ℹ️ 關於</h3>
       <div class="hint" id="aboutBox" style="line-height:1.9">
         <b>鹿豹</b> · 台灣道路測速預報 · <span id="setVer">公測版 v1.9</span><br>
+        <button class="btn sm" id="btnUpdCheck" style="margin:4px 0">🔄 檢查更新</button>
+        <span id="updStat" style="font-size:12px;color:var(--dim)"></span><br>
         著作權所有 © 2026 winnerich168．保留所有權利<br>
         <b style="color:var(--warn)">公測期間資料仍在補齊</b>，各縣市覆蓋狀況請看「資料」頁。
         <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line)">
@@ -734,7 +743,7 @@ const K=k=>'lp.'+k;
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.9.2';
+const APP_VER='v1.9.3';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -4026,6 +4035,75 @@ async function autoData(){
   }finally{ AUTO.busy=false; }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   19b. 檢查更新
+   · App（APK）：問 GitHub Releases 最新版號，比 APP_VER 新就提示；點一下開啟下載，
+     下載完由使用者按「安裝」（Android 規定，非商店來源的 App 一定要本人確認，無法跳過）
+   · 網頁版：抓網站上的 index.html 比建置序號，較新就提示；點一下清掉快取重新載入
+     （不然 Service Worker 是快取優先，要完整關掉再開兩次才會換成新版）
+   ═══════════════════════════════════════════════════════════ */
+const RELEASES_API='https://api.github.com/repos/winnerich168/luleopard/releases/latest';
+const UPD={checking:false,avail:null,closed:false,lastAt:0};
+/** 'v1.9.10' > 'v1.9.2' 這種比較，不能用字串比 */
+function verNewer(a,b){
+  const n=v=>String(v||'').replace(/^v/i,'').split('.').map(x=>parseInt(x,10)||0);
+  const A=n(a),B=n(b);
+  for(let i=0;i<Math.max(A.length,B.length);i++){ if((A[i]||0)!==(B[i]||0)) return (A[i]||0)>(B[i]||0); }
+  return false;
+}
+async function checkUpdate(manual){
+  if(UPD.checking) return; UPD.checking=true; UPD.lastAt=Date.now();
+  const st=el('updStat'); if(manual&&st) st.textContent='檢查中…';
+  try{
+    let avail=null;
+    if(Native.isNative&&Native.platform()!=='android'){
+      // iPhone 版是用 Xcode 自己裝的，GitHub 上的 APK 對它沒有用
+      if(manual&&st) st.textContent='iPhone 版請接上 Mac 用 Xcode 重新安裝來更新'; return;
+    }
+    if(Native.isNative){
+      const r=await fetch(RELEASES_API,{headers:{accept:'application/vnd.github+json'}});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j=await r.json();
+      const apk=(j.assets||[]).find(a=>/release\.apk$/i.test(a.name))||(j.assets||[]).find(a=>/\.apk$/i.test(a.name));
+      if(apk&&verNewer(j.tag_name,APP_VER)) avail={kind:'apk',ver:j.tag_name,url:apk.browser_download_url};
+    }else if(/^https?:$/.test(location.protocol)){
+      // ?fresh 讓 Service Worker 放行、直接走網路（見 build-pages.mjs 產生的 sw.js）
+      const u=new URL('index.html',location.href); u.searchParams.set('fresh',Date.now());
+      const r=await fetch(u,{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const html=await r.text();
+      const b=(html.match(/const APP_BUILD='([^']*)'/)||[])[1];
+      const v=(html.match(/const APP_VER='([^']*)'/)||[])[1];
+      if(b&&b>APP_BUILD) avail={kind:'web',ver:v||b,build:b};
+    }else{ if(manual&&st) st.textContent='本機開檔，不檢查更新'; return; }
+    UPD.avail=avail; paintUpdate();
+    if(manual&&st) st.textContent= avail? '有新版 '+avail.ver : '✅ 已經是最新版（'+APP_VER+'）';
+  }catch(e){
+    if(manual&&st) st.textContent='❌ 檢查失敗（'+e.message+'），請確認網路';
+  }finally{ UPD.checking=false; }
+}
+function paintUpdate(){
+  const bar=el('updBar'); if(!bar) return;
+  if(!UPD.avail||UPD.closed){ bar.classList.add('hidden'); return; }
+  el('updTx').textContent= UPD.avail.kind==='apk'
+    ? '🆕 有新版 '+UPD.avail.ver+'，點這裡下載更新'
+    : '🆕 有新版 '+UPD.avail.ver+'，點這裡立即更新';
+  bar.classList.remove('hidden');
+}
+async function applyUpdate(){
+  const a=UPD.avail; if(!a) return;
+  if(a.kind==='apk'){
+    toast('開始下載新版，下載完成後點通知或檔案，按「更新」即可',7000);
+    // App 內的 WebView 遇到外部網址會交給系統瀏覽器／下載管理員處理
+    location.href=a.url;
+    return;
+  }
+  toast('更新中…');
+  try{ const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); }catch(e){}
+  try{ const reg=await navigator.serviceWorker.getRegistration(); if(reg) await reg.update(); }catch(e){}
+  location.reload();
+}
+
 /* ---------- 20. 啟動 ---------- */
 function boot(){
   initMap(); bind();
@@ -4068,6 +4146,11 @@ function boot(){
     l.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/manifest+json'}));
     document.head.appendChild(l);
   }catch(e){}
+  // 檢查更新：開啟 5 秒後一次，之後每 6 小時
+  el('updBar').onclick=e=>{ if(e.target.id==='updClose'){ UPD.closed=true; paintUpdate(); return; } applyUpdate(); };
+  el('btnUpdCheck').onclick=()=>checkUpdate(true);
+  setTimeout(()=>checkUpdate(false),5000);
+  setInterval(()=>{ if(Date.now()-UPD.lastAt>6*3600e3) checkUpdate(false); },30*60e3);
   // 自動抓資料：開啟時先跑一次，之後每 5 分鐘檢查（各自有更新間隔，不會每次都下載）
   setTimeout(autoData,1500);
   setInterval(autoData,5*60e3);
@@ -4097,7 +4180,7 @@ function boot(){
              ingest,ingestZip,isZip,addPack,textToCams,parseCSV,rowsToCams,
              PACKS:()=>PACKS,clearPacks:()=>{PACKS=[];savePacks();rebuildDB();},
              APP_VER,APP_STAGE,APP_BUILD,
-             startSim,stopSim,state,autoData,AUTO,DATA_BASE};
+             startSim,stopSim,state,autoData,AUTO,DATA_BASE,checkUpdate,applyUpdate,verNewer,UPD};
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
 })();

@@ -1,5 +1,5 @@
 /* 鹿豹 Service Worker — 由 scripts/build-pages.mjs 產生，不要手改 */
-const VER = '772e1188dd00';
+const VER = 'a511a396c0b8';
 const CACHE = 'luleopard-' + VER;
 
 // App 本體：一定要快取，離線就靠這些
@@ -27,6 +27,8 @@ self.addEventListener('fetch', e => {
   // 地圖圖磚、TDX、自己的後端一律不碰 —— 快取路況資料是危險的，
   // 使用者會看到早就不存在的事故。同源以外的東西直接放行。
   if (url.origin !== location.origin) return;
+  // App 內「檢查更新」用 ?fresh 直接問網路，不能回快取的舊版，也不要把它存進快取
+  if (url.searchParams.has('fresh')) return;
 
   // 測速點資料（data/）：網路優先，成功就順便更新快取；離線時退回上一次成功的版本。
   // 這樣既拿得到最新資料，沒訊號時也不會整個空掉。
