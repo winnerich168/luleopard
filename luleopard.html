@@ -734,7 +734,7 @@ const K=k=>'lp.'+k;
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.9';
+const APP_VER='v1.9.1';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -1135,6 +1135,13 @@ const state=new Map();          // camId -> 已觸發到第幾級
    （定位跳點、航向暫時不可信、剛好被線段掃描豁免），它就會被重新選上。
    改成明確記錄「這個點這一趟已經過去了」，之後一律不再選它 —— 結構上就不可能再發生。*/
 const passedCams=new Map();     // camId -> 通過時間
+/* 這一趟離每個測速點最近到過多近（公尺）。
+   實地回報：測速照相在前方轉角後，還沒開到就播「已通過」，之後真的開到反而不提醒了。
+   以前只要「提醒過、而且現在它在車頭 85° 以外」就算通過 —— 轉角前，轉角後的照相
+   直線看過去就在側邊，於是誤判。現在必須「真的開到它旁邊過、而且正在遠離」才算通過。 */
+const camMin=new Map();
+/** 算「開到旁邊過」的距離門檻：照相座標本身常偏離路面數十公尺，定位差時再放寬 */
+const passNear=acc=>Math.max(60,Math.min(acc||0,100)+30);
 let lastAlertAt=0;
 
 function tierDist(tier,speedMps){
@@ -1152,8 +1159,16 @@ function tierDist(tier,speedMps){
   if(tier<3){
     const gap=Math.min(medGap(),30);
     d += v*gap*(tier===1?1:0.5);
+    // 定位誤差的補償：誤差 100 公尺時，實際位置可能比畫面上再往前 100 公尺，
+    // 照原本的距離提醒就會晚到。誤差多少就提早多少（最多 150 公尺）。
+    d += accPad();
   }
   return d;
+}
+/** 最近幾筆定位的誤差（公尺），30 公尺以內視為準確、不補償；最多補 150 公尺 */
+function accPad(){
+  const a=(typeof GPSQ!=='undefined'&&GPSQ.accs.length)? med(GPSQ.accs.slice(-4)) : 0;
+  return a>30? Math.min(a,150) : 0;
 }
 /**
  * 遠距預告（第 0.5 級，存在 state 裡的值是 PRE）。
@@ -1166,7 +1181,8 @@ const PRE=0.5;
 function preDist(speedMps){
   const v=speedMps||0;
   const base=Math.max(CFG.t0||1000, v*40);
-  return Math.max(base, tierDist(1,v)*1.25) + v*Math.min(medGap(),30);
+  // tierDist(1) 已經含定位誤差補償，這裡的 base 沒有，另外補上
+  return Math.max(base+accPad(), tierDist(1,v)*1.25) + v*Math.min(medGap(),30);
 }
 /** 最近幾次定位的間隔中位數（秒）。還沒有樣本時回傳 0，等於不補償。 */
 function medGap(){
@@ -1216,24 +1232,31 @@ function evaluate(pos){
   for(const c of CAMS){
     // 這一趟已經開過去的，永遠不再選 —— 這是「距離會往上加」的根治方式
     if(passedCams.has(c.id)){ state.delete(c.id); continue; }
-    if(Math.abs(c.lat-lat)>dLat||Math.abs(c.lon-lon)>dLon) { state.delete(c.id); continue; }
+    if(Math.abs(c.lat-lat)>dLat||Math.abs(c.lon-lon)>dLon) { state.delete(c.id); camMin.delete(c.id); continue; }
     const d0=dist(lat,lon,c.lat,c.lon);
     const d=sweptDist(pos,c,d0);          // 這一步「掃過」的最近距離
-    if(d>far){ state.delete(c.id); continue; }
+    if(d>far){ state.delete(c.id); camMin.delete(c.id); continue; }
     if(!dirMatch(c,hd)){ state.delete(c.id); continue; }
+    const nearest=Math.min(camMin.has(c.id)?camMin.get(c.id):Infinity, d);
+    camMin.set(c.id,nearest);
+    // 真的通過 = 曾經開到它旁邊，而且現在已經離開一段距離
+    const wentBy = nearest<=passNear(pos.acc) && d0>=nearest+15;
     // 判斷它現在在前方還是後方（有可信航向且真的在動時才判得準）
     let behind=false;
     if(hd!=null&&!isNaN(hd)&&v>1.5){
       behind = angDiff(bearing(lat,lon,c.lat,c.lon),hd)>85;
     }
     if(behind){
-      // 已經警示過的點跑到後方 = 真的通過了 → 提示一次並永久排除
-      if((state.get(c.id)||0)>0) announcePassed(c,pos);
-      // 這一步是「掃過去」的（線段離它很近但現在已經在後方）也算通過
-      else if(d0-d>=25) announcePassed(c,pos);
-      else state.delete(c.id);
+      // 開到旁邊過、現在在後方 = 真的通過了 → 提示一次並永久排除
+      // （包含這一步是「掃過去」的：線段離它很近，sweptDist 已經把 nearest 壓到很小）
+      if(wentBy) announcePassed(c,pos);
+      // 還沒真的靠近過卻在側後方：多半是轉角、彎道或定位飄移。
+      // 這一輪先不提醒，但保留已提醒到第幾級 —— 轉過彎它回到前方時照常繼續，不會重唸
       continue;
     }
+    // 沒有可信航向時判不出前後：開到旁邊過、又已經明顯遠離（60 公尺以上）也算通過，
+    // 不然它會一直被選成「前方最近的點」，距離越顯示越大
+    if(hd==null&&nearest<=passNear(pos.acc)&&d0>=nearest+60){ announcePassed(c,pos); continue; }
     // 距離相同時（例如同一位置同時有點測與區間），優先提示區間測速
     if(!best || d < best.d-1 || (Math.abs(d-best.d)<=1 && c.sec && !best.cam.sec)) best={cam:c,d,d0};
   }
@@ -4043,13 +4066,13 @@ function boot(){
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
              kmAtPoint,cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
-             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();IC.said.clear();IC.lastAt=0;},updateTrip,
+             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();IC.said.clear();IC.lastAt=0;},camMin,updateTrip,
              upcomingCams,renderTrip,fmtKm,fmtDur,
              openFabMenu,closeFabMenu,armFabMenu,fabMenuOpen,FAB_MENU_MS,
              passedCams,announcePassed,
              IC,loadInterchanges,icTick,icStatus,
              hazScore,scoreLabel,SCORE_SPEAK,SCORE_SHOW,HALF_LIFE,
-             hazTiers,roadSpeak,evaluateHazards,extraHazards,preDist,PRE,Audio_,OFFICIAL,paintOfficial,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
+             hazTiers,roadSpeak,evaluateHazards,extraHazards,preDist,accPad,PRE,Audio_,OFFICIAL,paintOfficial,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
              REPORTS:()=>REPORTS,setReports:a=>{REPORTS=a;Store.set(K('reports'),REPORTS);rebuildDB();},
              HAZARDS:()=>HAZARDS,setHazards:a=>{HAZARDS=a;},hazState,pullHazards,voteHazard,isFastRoad,
              retractHazard,probeTick,sendProbe,cruiseSpeed,cruiseSample,PROBE,
