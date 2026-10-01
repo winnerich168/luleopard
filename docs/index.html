@@ -661,7 +661,7 @@ textarea{resize:vertical;min-height:74px}
     <div class="card">
       <h3>ℹ️ 關於</h3>
       <div class="hint" id="aboutBox" style="line-height:1.9">
-        <b>鹿豹</b> · 台灣道路測速預報 · <span id="setVer">公測版 v1.9.4</span><br>
+        <b>鹿豹</b> · 台灣道路測速預報 · <span id="setVer">公測版 v1.9.5</span><br>
         <button class="btn sm" id="btnUpdCheck" style="margin:4px 0">🔄 檢查更新</button>
         <span id="updStat" style="font-size:12px;color:var(--dim)"></span><br>
         著作權所有 © 2026 winnerich168．保留所有權利<br>
@@ -750,13 +750,13 @@ const K=k=>'lp.'+k;
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.9.4';
+const APP_VER='v1.9.5';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261001.2256';
+const APP_BUILD='20261002.0457';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -1817,6 +1817,7 @@ function onPos(lat,lon,heading,speed,acc,simulated){
   paintSecRow();
   paintHazRow(evaluateHazards(p));
   updateMapPos(p);
+  camViewTick(p);
   drawRadar(p);
   // 開著的分頁才即時重繪；省電模式下連這個都跳過
   if(!POWER.saving){
@@ -2012,15 +2013,35 @@ function initMap(){
   }catch(e){ el('radarWrap').classList.remove('hidden'); }
 }
 function camColor(c){ return c.src==='user'? '#4aa8ff' : c.sec? '#c9a227' : '#ff4d4d'; }
+/* 地圖上只顯示行進方向的照相（實地回報：希望推估行車方向後，只看到那個方向的）。
+   有可信航向且在移動時才過濾；雙向、沒標方向的照相無法確定，照樣顯示。
+   停車或方向判斷不出來時全部顯示。 */
+const CAMVIEW={hd:null,lat:null,lon:null};
 function drawCamLayer(){
   if(!camLayer) return;
   camLayer.clearLayers();
-  const sub=CAMS.length>1500? CAMS.filter((_,i)=>i%2===0) : CAMS;
+  const hd=CAMVIEW.hd;
+  let sub=hd==null? CAMS : CAMS.filter(c=>dirMatch(c,hd));
+  // 點太多時只畫附近 30 公里內（以前是「每隔一支跳過」，等於一半的照相根本沒畫在地圖上）
+  if(sub.length>1500&&CAMVIEW.lat!=null){
+    const R=0.3;
+    sub=sub.filter(c=>Math.abs(c.lat-CAMVIEW.lat)<R&&Math.abs(c.lon-CAMVIEW.lon)<R);
+  }
   sub.forEach(c=>{
     L.circleMarker([c.lat,c.lon],{radius:5,color:'#fff',weight:1,fillColor:camColor(c),fillOpacity:.95})
      .bindPopup('<b>'+esc(c.name)+'</b><br>'+(c.lim?('速限 '+c.lim+' km/h<br>'):'')+esc(c.dir||''))
      .addTo(camLayer);
   });
+}
+/** 每次定位呼叫：行進方向改變超過 30°、開始或停止移動、移動超過 10 公里時才重畫 */
+function camViewTick(p){
+  const moving=p.headingOk!==false&&p.heading!=null&&!isNaN(p.heading)&&(p.speed||0)>3;
+  const hd=moving? p.heading : null;
+  const far=CAMVIEW.lat==null||dist(CAMVIEW.lat,CAMVIEW.lon,p.lat,p.lon)>10000;
+  const changed=(hd==null)!==(CAMVIEW.hd==null)||(hd!=null&&angDiff(hd,CAMVIEW.hd)>30);
+  if(!changed&&!far) return;
+  CAMVIEW.hd=hd; CAMVIEW.lat=p.lat; CAMVIEW.lon=p.lon;
+  drawCamLayer();
 }
 /* 目前位置：藍點＋紅色外圈。
    刻意不畫方向指示（錐形、三角）：航向常有偏差，畫出來反而誤導。 */
@@ -4295,7 +4316,7 @@ function boot(){
              ingest,ingestZip,isZip,addPack,textToCams,parseCSV,rowsToCams,
              PACKS:()=>PACKS,clearPacks:()=>{PACKS=[];savePacks();rebuildDB();},
              APP_VER,APP_STAGE,APP_BUILD,
-             startSim,stopSim,state,autoData,AUTO,DATA_BASE,checkUpdate,applyUpdate,verNewer,UPD};
+             startSim,stopSim,state,CAMVIEW,camViewTick,drawCamLayer,camLayerCount:()=>camLayer?camLayer.getLayers().length:0,autoData,AUTO,DATA_BASE,checkUpdate,applyUpdate,verNewer,UPD};
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
 })();
