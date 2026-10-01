@@ -635,14 +635,12 @@ textarea{resize:vertical;min-height:74px}
       <input type="range" id="rPowerMin" min="2" max="30" step="1" style="width:100%">
     </div>
     <div class="card">
-      <h3>📏 警示距離 <small>依車速自動延伸</small></h3>
-      <div class="row"><label>預告</label><span><b id="vT1">600</b> m</span></div>
-      <input type="range" id="rT1" min="200" max="1500" step="50" style="width:100%">
-      <div class="row"><label>注意</label><span><b id="vT2">300</b> m</span></div>
-      <input type="range" id="rT2" min="100" max="800" step="25" style="width:100%">
-      <div class="row"><label>警告</label><span><b id="vT3">120</b> m</span></div>
-      <input type="range" id="rT3" min="50" max="400" step="10" style="width:100%">
-      <div class="hint" style="margin-top:8px">實際觸發距離取「設定值」與「車速 × 反應秒數」的較大者，時速越高越早提醒。</div>
+      <h3>📏 警示距離 <small>依車速</small></h3>
+      <div class="row"><label>第一聲提醒距離</label><span>時速 × <b id="vAlertK">5</b> 公尺</span></div>
+      <input type="range" id="rAlertK" min="3" max="12" step="0.5" style="width:100%">
+      <div class="hint" id="alertKEx" style="margin-top:6px"></div>
+      <div class="hint" style="margin-top:6px">第二聲是第一聲的一半，最後一聲（就在前方）是時速 × 1.2 公尺。
+        定位很久才更新一次或誤差大時，會自動再提早一些。</div>
     </div>
     <div class="card">
       <h3>🧪 模擬行車 <small>沒開車也能驗證警示</small></h3>
@@ -743,7 +741,7 @@ const K=k=>'lp.'+k;
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.9.3';
+const APP_VER='v1.9.4';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -762,7 +760,7 @@ const DATA_BASE='https://winnerich168.github.io/luleopard/data/';
 const HAZ_API=(location.protocol==='file:'&&!window.Capacitor)? ''
             : 'https://luleopard-hazards.winnerich.workers.dev';
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
-           t0:1000,t1:600,t2:300,t3:120,simSpd:70,
+           alertK:5,t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:DATA_BASE+'speedcams.min.json',feedAuto:true,feedLast:0,feedCount:0,
            hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:DATA_BASE+'interchanges.min.json',icLast:0,
            powerSave:true,powerAfterMin:5,
@@ -1149,14 +1147,107 @@ const passedCams=new Map();     // camId -> 通過時間
    以前只要「提醒過、而且現在它在車頭 85° 以外」就算通過 —— 轉角前，轉角後的照相
    直線看過去就在側邊，於是誤判。現在必須「真的開到它旁邊過、而且正在遠離」才算通過。 */
 const camMin=new Map();
+
+/* ═══ 判斷照相是不是在「我正在走的這條路」上 ═══
+   實地回報：在國道上一路報「速限 50」—— 程式只看「大致在前方 85° 內」，
+   高速公路旁邊、底下平面道路的照相全被算進來。兩道過濾：
+
+   1. 軌跡走廊：用最近幾百公尺的經緯度變化算出行進方向與彎度，往前延伸成一條路線，
+      只報落在這條路線兩側一定寬度內的照相。路線越遠越寬（彎度估計有誤差）。
+   2. 車速對不上：高架與底下平面道路的位置幾乎重疊，光看位置分不出來。
+      持續時速 100 在開，旁邊速限 50 的照相不可能是這條路的；
+      反過來在平面道路慢慢開，頭上國道速限 100 的照相也不是。 */
+const TRACK=[];                 // 最近的行車軌跡（每 8 公尺記一點）
+const SPDHIST=[];               // 最近 40 秒的車速 {t, kmh}
+function trackPush(p){
+  const L=TRACK[TRACK.length-1];
+  if(L){
+    const d=dist(L.lat,L.lon,p.lat,p.lon);
+    if(d>800){ TRACK.length=0; }          // 位置瞬移（定位跳點、隧道出口）：軌跡重來
+    else if(d<8) return;
+  }
+  TRACK.push({lat:p.lat,lon:p.lon});
+  if(TRACK.length>80) TRACK.shift();
+}
+function spdPush(p,now){
+  // 只收可信的車速：手機 GPS 給的，或定位品質良好時推算的。
+  // 筆電／Wi-Fi 定位誤差幾百公尺時推算出來的車速常是 0 —— 拿它判斷會以為在平面道路慢開，
+  // 把國道照相全部濾掉。
+  const trusted=p.speedHw||(GPSQ.level==='good'&&(p.acc||0)<=30);
+  if(trusted&&p.speedOk!==false&&p.speed!=null&&isFinite(p.speed)) SPDHIST.push({t:now,kmh:p.speed*3.6});
+  while(SPDHIST.length&&now-SPDHIST[0].t>40000) SPDHIST.shift();
+}
+/** 最近 20 秒的持續車速（中位數）；樣本不足回傳 null，代表不做車速判斷 */
+function sustainedKmh(now){
+  now=now||Date.now();
+  const r=SPDHIST.filter(x=>now-x.t<=20000);
+  if(r.length<5||r[r.length-1].t-r[0].t<10000) return null;
+  return med(r.map(x=>x.kmh));
+}
+/** 軌跡的彎度（每公尺轉幾弧度，右轉為正）：比較「100～200 公尺前」與「最近 100 公尺」兩段的方向 */
+function trackCurvature(){
+  if(TRACK.length<4) return 0;
+  const now=TRACK[TRACK.length-1];
+  // 往回找兩個「不同的」點：pA 在約 100 公尺前，pB 再往前約 100 公尺。
+  // 定位很久才更新一次時，兩點之間可能隔好幾百公尺 —— 一段就超過 200 公尺，
+  // pA、pB 會落在同一點，算出一個不存在的急轉彎，把正前方的照相判成「不在路上」。
+  // 這種時候判斷不了彎度，當作直線。
+  let acc=0, iA=-1, iB=-1;
+  for(let i=TRACK.length-1;i>0;i--){
+    acc+=dist(TRACK[i].lat,TRACK[i].lon,TRACK[i-1].lat,TRACK[i-1].lon);
+    if(iA<0){ if(acc>=100){ if(acc>250) return 0; iA=i-1; acc=0; } }
+    else if(acc>=100){ if(acc>250) return 0; iB=i-1; break; }
+  }
+  if(iA<0||iB<0) return 0;
+  const pA=TRACK[iA], pB=TRACK[iB];
+  const h1=bearing(pB.lat,pB.lon,pA.lat,pA.lon), h2=bearing(pA.lat,pA.lon,now.lat,now.lon);
+  const dh=((h2-h1+540)%360-180)*Math.PI/180;
+  const L=(dist(pB.lat,pB.lon,pA.lat,pA.lon)+dist(pA.lat,pA.lon,now.lat,now.lon))/2;
+  if(L<50) return 0;
+  return Math.max(-1/120,Math.min(1/120,dh/L));
+}
+const FAST_ROAD_RE=/國道|國\d|快速|高架|台6[1-8]|交流道|系統/;
+/**
+ * 這個照相是不是在我正在走的路上。回傳 false = 別條路的，這一輪不報。
+ * 沒有可信航向或車速太慢時判斷不了，一律當作是（寧可多報，不要漏報）。
+ */
+function onMyRoad(c,pos,hd,kappa,sus){
+  // 2. 車速對不上
+  if(sus!=null&&c.lim>0){
+    const fastCam=FAST_ROAD_RE.test(c.name||'');
+    if(!fastCam&&c.lim<=70&&sus>c.lim+40) return false;     // 時速 100 經過速限 50 的平面道路照相
+    if(fastCam&&c.lim>=80&&sus<c.lim*0.6) return false;      // 平面道路慢開經過頭上的國道照相（國道塞車時也不報，塞車不會超速）
+  }
+  // 1. 軌跡走廊
+  if(hd==null||isNaN(hd)||(pos.speed||0)<3) return true;
+  const h=hd*Math.PI/180, cl=Math.cos(pos.lat*Math.PI/180);
+  const dx=(c.lon-pos.lon)*cl*111320, dy=(c.lat-pos.lat)*111320;
+  const along=dx*Math.sin(h)+dy*Math.cos(h);
+  if(along<=0) return true;                                   // 側後方交給「通過」判斷
+  const lateral=dx*Math.cos(h)-dy*Math.sin(h);                // 右側為正
+  const off=lateral-kappa*along*along/2;                      // 扣掉彎道預測的偏移
+  const W=45+0.10*along+Math.min(pos.acc||0,60);
+  return Math.abs(off)<=W;
+}
 /** 算「開到旁邊過」的距離門檻：照相座標本身常偏離路面數十公尺，定位差時再放寬 */
 const passNear=acc=>Math.max(60,Math.min(acc||0,100)+30);
 let lastAlertAt=0;
 
+/**
+ * 三級警示距離：依車速。
+ *   第一聲（預告）＝ 時速 × N 公尺（N 預設 5，也就是「車速的千分之五」公里）
+ *                   時速 100 → 500 公尺、時速 50 → 250 公尺
+ *   第二聲（注意）＝ 第一聲的一半
+ *   第三聲（就在前方）＝ 時速 × 1.2 公尺（時速 100 → 120 公尺）
+ * 各級有下限，停等或龜速時不會短到來不及。
+ * 實地回報：以前固定 600／300 公尺起跳、外加 1 公里遠距預告，市區慢慢開時太早報、
+ * 轉角前也報；改成完全跟著車速走。
+ */
+const TIER_MIN=[150,80,50];
 function tierDist(tier,speedMps){
-  const base=[CFG.t1,CFG.t2,CFG.t3][tier-1];
-  const v=speedMps||0;
-  let d=Math.max(base, v*REACT[tier-1]);
+  const v=speedMps||0, kmh=v*3.6, k=CFG.alertK||5;
+  let d= tier===1? kmh*k : tier===2? kmh*k/2 : kmh*1.2;
+  d=Math.max(d,TIER_MIN[tier-1]);
   /* 定位更新間隔的補償。
      時速 100 每秒走 28 公尺：1 秒更新一次，三個級距都踩得到；
      但更新間隔拉到 20 秒就是一步 556 公尺 —— 比整個第一級警示窗還寬，
@@ -1171,6 +1262,11 @@ function tierDist(tier,speedMps){
     // 定位誤差的補償：誤差 100 公尺時，實際位置可能比畫面上再往前 100 公尺，
     // 照原本的距離提醒就會晚到。誤差多少就提早多少（最多 150 公尺）。
     d += accPad();
+  }else{
+    /* 「就在前方」原本不補償。但定位超過 3 秒才更新一次時，下一筆來的時候早就開過去了，
+       整個「就在前方」的範圍會被一步跳過 —— 這一筆就該先說。 */
+    const gap=Math.min(medGap(),30);
+    if(gap>3) d += v*gap*0.5;
   }
   return d;
 }
@@ -1179,20 +1275,9 @@ function accPad(){
   const a=(typeof GPSQ!=='undefined'&&GPSQ.accs.length)? med(GPSQ.accs.slice(-4)) : 0;
   return a>30? Math.min(a,150) : 0;
 }
-/**
- * 遠距預告（第 0.5 級，存在 state 裡的值是 PRE）。
- * 三個級距在時速 100 時大約是 600 → 330 → 170 公尺，第一聲只剩 20 秒反應時間。
- * 實地回報希望「從遠到近」一路唸：先在 1 公里外預告，再一級一級倒數到眼前。
- * 車速快時拉長成約 40 秒車程（時速 110 ≈ 1.2 公里），同樣補償定位間隔。
- * 用 0.5 而不是另開一個 Map：比大小（tier>prev）、「警示過才算通過」(>0) 都照舊成立。
- */
+/* 遠距預告（PRE）已停用：改成完全依車速的三級距離。保留常數讓舊狀態值仍可比較 */
 const PRE=0.5;
-function preDist(speedMps){
-  const v=speedMps||0;
-  const base=Math.max(CFG.t0||1000, v*40);
-  // tierDist(1) 已經含定位誤差補償，這裡的 base 沒有，另外補上
-  return Math.max(base+accPad(), tierDist(1,v)*1.25) + v*Math.min(medGap(),30);
-}
+function preDist(){ return 0; }
 /** 最近幾次定位的間隔中位數（秒）。還沒有樣本時回傳 0，等於不補償。 */
 function medGap(){
   const g=GPSQ&&GPSQ.gaps;
@@ -1229,7 +1314,13 @@ function sweptDist(pos,cam,d){
 function evaluate(pos){
   const {lat,lon,heading,speed}=pos;
   const v=speed||0;                      // m/s
-  const far=Math.max(tierDist(1,v)*1.6,preDist(v)*1.15,1200);
+  /* 算距離用的車速。車速不可信（筆電、只靠 Wi-Fi 定位、定位很久才更新、
+     誤差大於 50 公尺時由位置推算出來的車速常是假的 0）時當成時速 90：
+     當成 0 的話距離會縮到最小值，開到眼前才響。寧可早一點提醒。
+     超速判斷仍用真實車速，而且車速不可信時本來就不判超速。 */
+  const speedTrusted = pos.speedHw || (pos.speedOk!==false && (pos.acc||0)<=50);
+  const vd = speedTrusted ? v : Math.max(v,25);
+  const far=Math.max(tierDist(1,vd)*1.6,800);
   // 粗篩視窗依 far 動態計算（1 緯度≈111.3km；經度依緯度收縮）
   const dLat=far/111320*1.15, dLon=far/(111320*Math.max(0.2,Math.cos(rad(lat))))*1.15;
   let best=null;
@@ -1237,6 +1328,7 @@ function evaluate(pos){
   // 航向只有在「可信」時才拿來過濾。Wi-Fi 定位飄移推算出來的航向是隨機的，
   // 拿它過濾會把正確的測速點濾掉，變成整趟安靜 —— 寧可多報也不要漏報。
   const hd = pos.headingOk===false ? null : heading;
+  const kappa=trackCurvature(), sus=sustainedKmh();
 
   for(const c of CAMS){
     // 這一趟已經開過去的，永遠不再選 —— 這是「距離會往上加」的根治方式
@@ -1250,6 +1342,11 @@ function evaluate(pos){
     camMin.set(c.id,nearest);
     // 真的通過 = 曾經開到它旁邊，而且現在已經離開一段距離
     const wentBy = nearest<=passNear(pos.acc) && d0>=nearest+15;
+    // 不在我正在走的路上（旁邊、底下的路）：這一輪不報，也不算「通過」
+    if(!onMyRoad(c,pos,hd,kappa,sus)){
+      if(wentBy){ passedCams.set(c.id,Date.now()); state.delete(c.id); }   // 安靜地排除，不唸「已通過」
+      continue;
+    }
     // 判斷它現在在前方還是後方（有可信航向且真的在動時才判得準）
     let behind=false;
     if(hd!=null&&!isNaN(hd)&&v>1.5){
@@ -1276,8 +1373,7 @@ function evaluate(pos){
   // 級距用「掃過的最近距離」判斷（才不會整個跨過去），
   // 但唸出來的距離要用真實的目前距離，不然會唸出一個已經不對的數字。
   let tier=0;
-  if(d<=tierDist(3,v)) tier=3; else if(d<=tierDist(2,v)) tier=2; else if(d<=tierDist(1,v)) tier=1;
-  else if(d<=preDist(v)) tier=PRE;
+  if(d<=tierDist(3,vd)) tier=3; else if(d<=tierDist(2,vd)) tier=2; else if(d<=tierDist(1,vd)) tier=1;
   const prev=state.get(cam.id)||0;
 
   if(tier>prev&&tier>0){
@@ -1288,7 +1384,7 @@ function evaluate(pos){
     // 只有「真的播出去」或「刻意靜音」才推進狀態；被節流時保留，下一輪再補播
     if(quiet||announce(cam,d0,tier,over,kmh,pos.speedOk!==false)) state.set(cam.id,tier);
   }
-  paintAlert({cam,d:d0,tier,v});
+  paintAlert({cam,d:d0,tier,v,vd});
   return best;
 }
 
@@ -1299,8 +1395,10 @@ function evaluate(pos){
  */
 function announcePassed(cam,pos){
   if(passedCams.has(cam.id)) return;
+  const alerted=(state.get(cam.id)||0)>0;
   passedCams.set(cam.id,Date.now());
   state.delete(cam.id);
+  if(!alerted) return;                    // 沒提醒過的就不要突然冒一句「已通過」
   if(cam.sec) return;                     // 區間測速有自己的結算提示，不重複講
   if(!CFG.passNotice) return;
   const kind=cam.sec?'區間測速':'測速照相';
@@ -1352,7 +1450,7 @@ function paintAlert(a){
   if(cam.lim>0){ badge.classList.remove('off'); badge.textContent=cam.lim;
     const kmh=v*3.6; badge.style.borderColor = kmh>cam.lim+2? 'var(--danger)':'#2fd07a'; }
   else { badge.classList.add('off'); badge.textContent='--'; }
-  const span=tierDist(1,v)*1.6;
+  const span=tierDist(1,a.vd!=null?a.vd:v)*1.6;
   el('hudBarFill').style.width=Math.max(0,Math.min(100,(1-d/span)*100))+'%';
   el('hudBarFill').style.background= tier===3?'var(--danger)':tier===2?'var(--warn)':'var(--info)';
 }
@@ -1703,6 +1801,7 @@ function onPos(lat,lon,heading,speed,acc,simulated){
   paintGpsWarn(simulated);
   powerTick(p);
   probeTick(p);
+  trackPush(p); spdPush(p,now);
   evaluate(p);
   icTick(p);
   updateTrip(p);
@@ -3040,11 +3139,12 @@ function paintSecRow(){
   if(!SECTION){ row.className=''; return; }
   const s=SECTION, lim=s.limit||0, avg=Math.round(s.avg||0), over=lim>0&&avg>lim+1;
   row.className='show'+(over?' over':'');
+  /* 實地回報：最右邊只有一個數字，看不懂是什麼。每個數字都要寫清楚是什麼 */
   const rest=(s.maxRemain!=null&&lim>0&&s.remainM>50)
-    ? '　剩 '+fmtKm(s.remainM)+'　可跑 '+Math.round(s.maxRemain)
-    : (s.remainM!=null? '　剩 '+fmtKm(s.remainM) : '');
-  el('secRowTx').textContent='區間測速'+(lim?(' 速限'+lim):'')+rest;
-  el('secRowAvg').textContent=avg+'　';
+    ? ' · 剩 '+fmtKm(s.remainM)+' · 後段最高 '+Math.round(s.maxRemain)
+    : (s.remainM!=null? ' · 剩 '+fmtKm(s.remainM) : '');
+  el('secRowTx').textContent='區間'+(lim?(' 速限'+lim):'')+rest;
+  el('secRowAvg').textContent='平均 '+avg+'　';
   el('secRowAvg').style.color=over?'var(--danger)':'var(--ok)';
 }
 
@@ -3481,6 +3581,8 @@ function updateTrip(pos){
       if(!c.sec) continue;
       if(Math.abs(c.lat-pos.lat)>0.003||Math.abs(c.lon-pos.lon)>0.004){ secApproach.delete(c.id); continue; }
       if(!dirMatch(c,pos.heading)) continue;
+      // 旁邊另一條路的區間起點不算（實地回報：明明沒有區間測速卻報「進入區間」）
+      if(!onMyRoad(c,pos,pos.headingOk===false?null:pos.heading,trackCurvature(),sustainedKmh())){ secApproach.delete(c.id); continue; }
       const d=dist(pos.lat,pos.lon,c.lat,c.lon);
       if(d>=150||v<=2){ secApproach.delete(c.id); continue; }
       const m=secApproach.has(c.id)? secApproach.get(c.id) : Infinity;
@@ -3709,7 +3811,11 @@ function bind(){
 
   const rng=(rid,vid,key)=>{ const r=el(rid); r.value=CFG[key]; el(vid).textContent=CFG[key];
     r.oninput=()=>{ CFG[key]=+r.value; el(vid).textContent=r.value; saveCfg(); state.clear(); }; };
-  rng('rT1','vT1','t1'); rng('rT2','vT2','t2'); rng('rT3','vT3','t3'); rng('rSimSpd','vSimSpd','simSpd');
+  rng('rSimSpd','vSimSpd','simSpd');
+  const kEx=()=>{ const k=CFG.alertK||5;
+    el('alertKEx').textContent=[50,80,100,110].map(v=>'時速 '+v+' → '+Math.round(v*k)+' 公尺').join('　'); };
+  { const r=el('rAlertK'); r.value=CFG.alertK||5; el('vAlertK').textContent=CFG.alertK||5; kEx();
+    r.oninput=()=>{ CFG.alertK=+r.value; el('vAlertK').textContent=r.value; kEx(); saveCfg(); state.clear(); }; }
   rng('rPowerMin','vPowerMin','powerAfterMin');
 
   el('btnSim').onclick=()=>{ if(SIM) stopSim(); else { Audio_.unlock(); el('gate').classList.add('hidden');
@@ -4163,13 +4269,13 @@ function boot(){
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
              kmAtPoint,cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
-             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();secApproach.clear();SECTION=null;IC.said.clear();IC.lastAt=0;},camMin,updateTrip,
+             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();secApproach.clear();SECTION=null;TRACK.length=0;SPDHIST.length=0;IC.said.clear();IC.lastAt=0;},camMin,updateTrip,
              upcomingCams,renderTrip,fmtKm,fmtDur,
              openFabMenu,closeFabMenu,armFabMenu,fabMenuOpen,FAB_MENU_MS,
              passedCams,announcePassed,
              IC,loadInterchanges,icTick,icStatus,
              hazScore,scoreLabel,SCORE_SPEAK,SCORE_SHOW,HALF_LIFE,
-             hazTiers,roadSpeak,evaluateHazards,extraHazards,preDist,accPad,PRE,Audio_,OFFICIAL,paintOfficial,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
+             hazTiers,roadSpeak,evaluateHazards,extraHazards,preDist,accPad,PRE,Audio_,onMyRoad,trackCurvature,sustainedKmh,TRACK,SPDHIST,OFFICIAL,paintOfficial,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
              REPORTS:()=>REPORTS,setReports:a=>{REPORTS=a;Store.set(K('reports'),REPORTS);rebuildDB();},
              HAZARDS:()=>HAZARDS,setHazards:a=>{HAZARDS=a;},hazState,pullHazards,voteHazard,isFastRoad,
              retractHazard,probeTick,sendProbe,cruiseSpeed,cruiseSample,PROBE,

@@ -57,7 +57,8 @@ const path = require('path');
                o.hasSpeed ? 速度 : null,
                o.accuracy, false);      // false = 走真實定位路徑，品質偵測才會啟動
       軌跡.push({ 剩餘公尺: Math.round(d), 畫面車速: document.getElementById('spd').textContent });
-      await new Promise(r => setTimeout(r, 5));
+      // 「就在前方」是插隊語音，80 毫秒後才送出。時鐘一步撥 20 秒的話，不等它就會在排隊時被當成過期丟掉
+      await new Promise(r => setTimeout(r, 每次間隔 >= 5 ? 120 : 5));
     }
     return {
       目標: c.name, 速限: c.lim,

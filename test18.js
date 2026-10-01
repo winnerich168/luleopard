@@ -4,7 +4,7 @@
    1. 每一句都先 cancel() 再 speak()：測速警示唸到一半，事故／已通過一出來就被切掉；
       Chrome／Android 在 cancel() 後立刻 speak() 還會把新的那句一起吃掉。
       → 改成語音佇列，只有第 3 級「就在這裡」才插隊。
-   2. 第一聲在時速 100 時只剩 600 公尺。→ 加 1 公里（約 40 秒車程）的遠距預告，
+   2. 要從遠到近一路唸。（原本另加 1 公里遠距預告，之後改成完全依車速：時速 × 5 公尺）
       之後 600 → 330 → 就在前方，一路倒數。
    3. 「回報」頁新增的事故／施工／坑洞，和 TDX 抓回來有座標的事件，只列清單不出聲。
 
@@ -89,15 +89,14 @@ const fs = require('fs');
   const ok = (name, cond) => { if (!cond) fails.push(name); };
   const camIdx = re => done.findIndex(t => re.test(t));
 
-  // 從遠到近：1 公里級預告 → 600 公尺級 → 330 公尺級 → 就在前方，順序不能亂
-  const iPre = camIdx(/^前方[\d.]+公里有測速照相/);
+  // 從遠到近：時速 × 5 → × 2.5 → 就在前方（時速 100：500 → 250 → 120 公尺），順序不能亂
+  //（以前另有 1 公里遠距預告；改成完全依車速後拿掉了）
   const i1 = camIdx(/^前方\d+公尺，測速照相/);
   const i2 = camIdx(/^注意，\d+公尺測速照相/);
   const i3 = camIdx(/^測速照相，速限100$/);
-  ok('測速照相有 1 公里級的遠距預告', iPre >= 0);
-  ok('遠距預告在 900 公尺以外', iPre >= 0 && Number(done[iPre].match(/前方([\d.]+)公里/)[1]) >= 0.9);
-  ok('四段都有唸完', i1 >= 0 && i2 >= 0 && i3 >= 0);
-  ok('從遠到近依序播報', iPre < i1 && i1 < i2 && i2 < i3);
+  ok('三段都有唸完', i1 >= 0 && i2 >= 0 && i3 >= 0);
+  ok('從遠到近依序播報', i1 < i2 && i2 < i3);
+  ok('第一聲約在 500 公尺（時速 100 × 5）', i1 >= 0 && Math.abs(+done[i1].match(/前方(\d+)公尺/)[1] - 500) <= 40);
   ok('測速警示沒有被其他語音切斷', !cut.some(t => /測速照相，速限|公尺，測速照相|公尺測速照相/.test(t)));
 
   // 各種路況來源都要唸
@@ -105,7 +104,7 @@ const fs = require('fs');
   ok('回報頁的施工有播報', done.some(t => /施工/.test(t)));
   ok('回報頁的施工從遠到近', done.some(t => /^前方\d+公尺，注意施工/.test(t)) && done.some(t => /^施工就在前方/.test(t)));
   ok('官方事件有播報', done.some(t => /官方通報/.test(t)) && done.filter(t => /事故就在前方/.test(t)).length >= 2);
-  ok('遠距預告只唸一次', done.filter(t => /^前方[\d.]+公里有測速照相/.test(t)).length === 1);
+  ok('第一聲只唸一次', done.filter(t => /^前方\d+公尺，測速照相/.test(t)).length === 1);
   ok('沒有頁面錯誤', errs.length === 0);
 
   await browser.close();

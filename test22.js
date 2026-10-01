@@ -65,7 +65,7 @@ const path = require('path');
   const enter = at(R.先快後慢, /進入區間測速/), end = at(R.先快後慢, /區間測速結束/);
   ok('開到起點附近才起算（誤差 30 公尺內）', enter && Math.abs(enter.m) <= 30);
   ok('終點落在全長 4 公里附近（誤差 60 公尺內）', end && Math.abs(end.m - 4000) <= 60);
-  ok('途中畫面顯示剩餘距離與可跑速度', R.先快後慢.some(x => x.row && /剩 .*可跑 \d+/.test(x.row)));
+  ok('途中畫面顯示剩餘距離與後段最高速度', R.先快後慢.some(x => x.row && /剩 .*後段最高 \d+/.test(x.row)));
   const early = at(R.先快後慢, /區間平均時速\d+，已超過/);
   ok('開滿 500 公尺才判斷平均超速', !early || early.m >= 500);
   ok('先快後慢：途中有提醒平均超速', !!early);
