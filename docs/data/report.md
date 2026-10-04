@@ -1,17 +1,17 @@
 # 鹿豹 · 測速點位合併報告
 
-產生時間：2026-09-28T08:37:55+08:00（耗時 2069.3s）
+產生時間：2026-10-02T07:28:30+08:00（耗時 2075.5s）
 
 ## 總覽
 
 | 項目 | 數量 |
 |---|---|
-| **合併後總點數** | **2103** |
-| 跨來源重複合併 | 354 |
-| 區間測速 | 63 |
-| 有速限資訊 | 2021 (96%) |
-| 有方向資訊 | 2030 (97%) |
-| 成功來源 | 8 / 13 |
+| **合併後總點數** | **2052** |
+| 跨來源重複合併 | 287 |
+| 區間測速 | 57 |
+| 有速限資訊 | 1975 (96%) |
+| 有方向資訊 | 1979 (96%) |
+| 成功來源 | 7 / 13 |
 
 ## 各來源
 
@@ -21,7 +21,7 @@
 | 測速執法設置點（警政署） | 省道/縣道 | 1897 | utf-8-sig | https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/EA5E6FCD |
 | 臺北市固定測速照相地點表 | 六都 | 143 | cp950 | https://data.taipei/api/dataset/745b8808-061f-4f5b-9a62-da1590c049a9/r |
 | 新北市固定式測速照相地點 | 六都 | 173 | utf-8-sig | https://data.ntpc.gov.tw/api/datasets/99f3ff6e-0352-4399-a726-775ab765 |
-| 桃園市測速照相設備地點 | 六都 | 118 | cp950 | https://opendata.tycg.gov.tw/api/dataset/ecd45ee5-4489-436b-bd08-7d4e4 |
+| 桃園市測速照相設備地點 | 六都 | — | cp950 | **失敗** |
 | 臺中市科技執法取締地點 | 六都 | 77 | utf-8-sig | https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download |
 | 臺南市智慧管理科技執法設備設置地點 | 六都 | — | utf-8-sig | **失敗** |
 | 臺南市科技執法設備（座標為 geocoding 推算） | 六都 | 5 | utf-8-sig | 檔案 tainan_geocoded.csv |
@@ -34,6 +34,8 @@
 ### 失敗的來源
 
 - **國道公路固定式測速照相地點**：https://www.tgos.tw/tgos/VirtualDir/Product/c2dd3a68-cafc-48fc-8a4a-7215ddc24cd3/1150720-國 → HTTPError: HTTP Error 403: Forbidden
+
+- **桃園市測速照相設備地點**：https://opendata.tycg.gov.tw/api/dataset/ecd45ee5-4489-436b-bd08-7d4e4111c4a4/resource/36e → ValueError: 找不到經緯度欄位（欄位為：success, code, s_message）
 
 - **臺南市智慧管理科技執法設備設置地點**：https://soa.tainan.gov.tw/Api/Service/Get/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → URLError: <urlopen error [Errno 110] Connection timed out> | https://data.tainan.gov.tw/File/ResourceCsvDownload/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → ValueError: 找不到經緯度欄位（欄位為：Seq, 編號, 轄區分局, 行政區, 設置位置, 拍攝
 行向, 速限）
@@ -50,10 +52,10 @@
 | 縣市 | 點數 |
 |---|---|
 | 臺中市 | 250 |
-| 桃園市 | 213 |
 | 新北市 | 189 |
 | （無法判斷） | 169 |
 | 臺北市 | 165 |
+| 桃園市 | 162 |
 | 臺南市 | 142 |
 | 高雄市 | 126 |
 | 雲林縣 | 97 |
