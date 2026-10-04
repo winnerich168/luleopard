@@ -2739,10 +2739,14 @@ function hazAgo(h,now){
   if(m<1) return '剛剛';
   if(m<60) return m+'分鐘前';
   const hh=Math.floor(m/60), mm=m%60;
+  if(hh>=24) return Math.floor(hh/24)+'天前';               // 官方施工常常一掛好幾天
   return hh+'小時'+(mm>=10? mm+'分':'')+'前';
 }
+/** 一下子就會處理掉的事件。施工、道路災害、坑洞會持續好幾天，舊不代表已經排除 */
+const HAZ_TRANSIENT=new Set(['塞車','掉落物','事故','車輛故障','動物']);
 /** 已經超過這類事件的半衰期：塞車 15 分鐘、掉落物 45 分鐘… 很可能已經處理掉了 */
-const hazStale=(h,now)=>{ const a=hazAgeMs(h,now); return a!=null&&a>=(HALF_LIFE[h.type]||45)*60e3; };
+const hazStale=(h,now)=>{ if(!HAZ_TRANSIENT.has(h.type)) return false;
+  const a=hazAgeMs(h,now); return a!=null&&a>=(HALF_LIFE[h.type]||45)*60e3; };
 const SCORE_SPEAK=1.0;    // 高於此值才出聲
 const SCORE_SHOW =0.4;    // 高於此值只顯示在畫面，低於就完全不提
 

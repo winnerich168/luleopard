@@ -6,6 +6,7 @@
      3. 用路人回報：「3 人回報，最近一次 5 分鐘前」
      4. 經過之後畫面跳出「還在／已經沒有了」，按了送到後端；15 秒沒按自己消失
      5. 沒開到旁邊（轉彎走掉）不跳
+     6. 官方施工一掛好幾天：唸「3天前」，但不說「可能已經排除」（施工本來就會持續）
 */
 const { chromium } = require('playwright');
 const path = require('path');
@@ -73,6 +74,7 @@ const fs = require('fs');
   R.官方12分 = await drive({ id: 'o-abc1', type: '掉落物', src: 'official', official: 'open', sinceMin: 12, score: 1.5 }, { press: 'passGone' });
   R.官方50分 = await drive({ id: 'o-abc2', type: '掉落物', src: 'official', official: 'open', sinceMin: 50, score: 1.5 });
   R.三人回報 = await drive({ id: 'u-1', type: '掉落物', reports: 3, confirms: 2, tMin: 5, score: 2 }, { press: 'passStill' });
+  R.官方施工三天 = await drive({ id: 'o-abc3', type: '施工', src: 'official', official: 'open', sinceMin: 3 * 1440 + 5, score: 1.5 });
   R.轉彎走掉 = await drive({ id: 'u-2', type: '掉落物', reports: 1, tMin: 3, score: 2 }, { turnAt: -900 });
   // 15 秒沒按：自己消失
   R.自動消失 = await page.evaluate(async () => {
@@ -97,6 +99,7 @@ const fs = require('fs');
   ok('多人回報唸出最近一次時間', R.三人回報.said.some(t => /3人回報，最近一次[567]分鐘前/.test(t)));
   ok('按「還在」送出確認', votes.includes('u-1 confirm'));
   ok('轉彎沒經過就不跳卡片', !R.轉彎走掉.card);
+  ok('官方施工三天：唸「3天前」、不說可能已經排除', R.官方施工三天.said.some(t => /官方3天前通報，注意施工/.test(t)) && !R.官方施工三天.said.some(t => /可能已經排除/.test(t)));
   ok('15 秒沒按自己消失', R.自動消失.出現 && !R.自動消失.之後);
   ok('沒有 JS 錯誤', errs.length === 0);
   console.log(fails.length ? '\n✗ 失敗：\n  ' + fails.join('\n  ') : '\n✓ 全部通過');
