@@ -290,6 +290,31 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
   t('方向容許角放寬（彎道不漏報）', oa && oa.brgTol === 110);
   t('官方事件 id 符合路由格式', oa && /^[A-Za-z0-9-]{4,40}$/.test(oa.id));
 
+  t('官方事件帶發生時間 since（App 唸「N 分鐘前」用）', oa && typeof oa.since === 'number' && oa.since < Date.now(), oa && oa.since);
+
+  // 用路人對官方事件的回饋：以前按「已經清掉了」會 404
+  {
+    const hw0 = stored.items.find(x => x.road === '台72');
+    const at = { lat: hw0.lat, lon: hw0.lon };
+    const v1 = await call2('POST', `/hazards/${hw0.id}/clear`, at);
+    t('官方事件可以回報已清除', v1.status === 200 && v1.body.official && !v1.body.removed, v1.body);
+    const v2 = await call2('POST', `/hazards/${hw0.id}/confirm`, at);
+    t('有人說還在 → 抵掉一張清除票', v2.status === 200 && v2.body.hazard.clears === 0, v2.body);
+    await call2('POST', `/hazards/${hw0.id}/clear`, at);
+    const v4 = await call2('POST', `/hazards/${hw0.id}/clear`, at);
+    t('兩人說已清除 → 這筆官方事件先不提供', v4.body.removed === true, v4.body);
+    const qv = await call2('GET', `/hazards?lat=${hw0.lat}&lon=${hw0.lon}&r=3000`);
+    t('被用路人回報清除的官方事件查不到', !qv.body.hazards.some(h => h.id === hw0.id), qv.body.hazards.map(h => h.id));
+    // 經過都沒減速的車流探針也算
+    const other = stored.items.find(x => x.id !== hw0.id && x.id !== acc.id);
+    if (other) {
+      for (let i = 0; i < 3; i++) await call2('POST', `/hazards/${other.id}/probe`, { lat: other.lat, lon: other.lon, slowed: false });
+      const qp = await call2('GET', `/hazards?lat=${other.lat}&lon=${other.lon}&r=3000`);
+      t('3 台車經過都沒減速 → 官方事件先不提供', !qp.body.hazards.some(h => h.id === other.id));
+    }
+    await metaDel(env2, 'official_votes');
+  }
+
   const hw = stored.items.find(x => x.road === '台72');
   t('省道施工也有', hw && hw.type === '施工' && hw.dir === '雙向');
   const qh = await call2('GET', `/hazards?lat=${hw.lat}&lon=${hw.lon}&r=3000`);

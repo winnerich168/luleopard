@@ -176,6 +176,18 @@ textarea{resize:vertical;min-height:74px}
 .leaflet-container{background:#0a0e13}
 
 /* ---------- 一鍵通報 ---------- */
+#passCard{display:none;position:absolute;left:12px;right:96px;bottom:18px;z-index:950;
+  background:#16212c;border:1px solid #3a5674;border-radius:14px;padding:10px 12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.6)}
+#passCard.show{display:block}
+#passCard .hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:9px}
+#passCard .hd b{font-size:15px}
+#passCard .hd span{font-size:12px;color:#9fb3c8;flex:1}
+#passCard .hd i{font-style:normal;font-size:20px;color:#7d8fa3;padding:0 4px;cursor:pointer}
+#passCard .bt{display:flex;gap:10px}
+#passCard button{flex:1;min-height:56px;border-radius:12px;font-size:17px;font-weight:800;border:none;color:#fff}
+#passStill{background:#b4561b}
+#passGone{background:#2e7d4f}
 #fabWrap{position:absolute;right:14px;bottom:18px;z-index:900;display:flex;flex-direction:column;
   align-items:center;gap:10px}
 .fab{border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -213,8 +225,23 @@ textarea{resize:vertical;min-height:74px}
 #icRow{display:none;align-items:center;gap:7px;margin-top:6px;padding:6px 9px;border-radius:8px;
   background:#10243a;border:1px solid #2a5c8f;font-size:13px;color:#bfe0ff}
 #icRow.show{display:flex}
-#icRow .tx{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#icRow .tx{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;gap:12px}
 #icRow .dd{font-variant-numeric:tabular-nums;font-weight:700;color:#7fc2ff}
+#icRow .ex{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#icRow .ex i{font-style:normal;font-size:11px;margin-left:3px;padding:0 4px;border-radius:4px;background:#2a5c8f;color:#fff}
+#icRow .ex em{font-style:normal;font-weight:800;font-variant-numeric:tabular-nums;color:#7fc2ff}
+#icRow .ex.n2{opacity:.75}
+/* 地圖上的出口標籤：點在出口位置，標籤在上方；地圖旋轉時由程式把它轉回正 */
+.exitMk{background:none;border:none}
+.exitPin{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
+.exitPin i{position:absolute;left:-6px;top:-6px;width:12px;height:12px;border-radius:50%;
+  background:#1565c0;border:2px solid #fff;box-shadow:0 0 0 1px #0d3a6e}
+.exitPin .lb{position:absolute;left:0;bottom:10px;transform:translateX(-50%);white-space:nowrap;
+  background:#1565c0;color:#fff;border:2px solid #fff;border-radius:8px;padding:3px 8px;
+  font:600 13px/1.25 system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.45);text-align:center}
+.exitPin .lb span{display:block;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
+.exitPin.n2 .lb{background:#3d6ea3;font-size:12px}
+.exitPin.n2 .lb span{font-size:13px}
 #hazRow{display:none;align-items:center;gap:9px;margin-top:7px;padding:7px 11px;border-radius:10px;
   background:#2a1d10;border:1px solid #7a4a12;font-size:13px}
 #hazRow.show{display:flex}
@@ -319,6 +346,9 @@ textarea{resize:vertical;min-height:74px}
       <button id="fabQuick" class="fab big drop" title="回報掉落物">📦<span>掉落物</span></button>
     </div>
     <div id="fabMenu" class="hidden"></div>
+    <!-- 經過剛提醒過的事件後：一鍵回報還在／已經沒有了（15 秒自動消失） -->
+    <div id="passCard"><div class="hd"><b id="passTx"></b><span id="passSub"></span><i id="passX">×</i></div>
+      <div class="bt"><button id="passStill">還在</button><button id="passGone">已經沒有了</button></div></div>
   </section>
 
   <!-- 旅程 -->
@@ -500,14 +530,15 @@ textarea{resize:vertical;min-height:74px}
       <div id="covList"></div>
     </div>
     <div class="card">
-      <h3>🛣️ 路網幾何 <small>讓前方清單沿著路彎過去</small></h3>
+      <h3>🛣️ 路網 <small>知道自己在哪條路、往哪個方向</small></h3>
       <div class="row"><label>目前狀態</label><b id="roadStat">未載入</b></div>
+      <div class="row"><div><label>氣壓計</label><div class="hint">分辨高架與平面道路用；不穩或沒有時只靠行駛軌跡</div></div><b id="baroStat">—</b></div>
       <div class="hint" style="margin-bottom:9px">
-        由 <code>etl/build_roadnet.py</code> 從 OpenStreetMap 產生。載入後：
-        前方測速點會<b>沿著道路</b>計算而不是用航向錐形猜（彎道不再漏列），
-        樁號推算也改用沿路距離，山區誤差大幅下降。<b>沒載入不影響其他功能。</b>
+        國道、快速道路、省道、縣道，<b>每個行車方向各一條</b>。App 用它判斷你正在走哪一條路：
+        <b>旁邊、底下另一條路的出口與測速照相都不會報</b>；前方測速點沿著道路計算，彎道不漏列。
+        預設<b>自動從官方網站載入</b>並每 7 天更新。資料由 <code>etl/build_roadgraph.py</code> 從 OpenStreetMap 產生。
       </div>
-      <input type="text" id="roadUrl" placeholder="https://你的帳號.github.io/專案/data/roadnet.min.json" autocomplete="off" spellcheck="false">
+      <input type="text" id="roadUrl" placeholder="https://你的帳號.github.io/專案/data/roadgraph.min.json" autocomplete="off" spellcheck="false">
       <button class="btn wide primary" id="btnRoadLoad">從網址載入路網</button>
       <button class="btn wide" id="btnRoadFile">改用檔案匯入</button>
       <input type="file" id="roadIn" accept=".json,.geojson" class="hidden">
@@ -515,28 +546,24 @@ textarea{resize:vertical;min-height:74px}
       <div class="hint" id="roadMsg" style="margin-top:8px"></div>
     </div>
     <div class="card">
-      <h3>🛣️ 交流道預報 <small>提前告訴你下一個出口</small></h3>
+      <h3>🛣️ 出口預報 <small>國道、快速道路、高架道路</small></h3>
       <div class="row"><label>目前狀態</label><b id="icStat">未載入</b></div>
       <div class="hint" style="margin-bottom:9px">
-        高速行駛（時速 60 以上）時，到達交流道前 <b>3 公里</b>播報一次名稱與出口編號 ——
-        決定要不要下交流道通常只有幾秒鐘，提前知道才來得及變換車道。<br>
-        預設會<b>自動從官方網站載入</b>並每 7 天更新，不用手動設定。
-        資料由 <code>etl/build_interchanges.py</code> 從 OpenStreetMap 產生。<b>沒載入不影響其他功能。</b>
+        到達出口前 <b>2 公里</b>播報一次名稱與出口編號；畫面與地圖上一直顯示<b>接下來兩個出口</b>與剩餘距離
+        （高架道路出口很密，常常不到 1 公里就有兩個）。<br>
+        <b>只報你正在走的這條路、這個方向的出口</b>。剛上路、或旁邊有另一條路貼得很近、還分不出在哪一條時，
+        寧可先不報。出口資料來自上面的「路網」。
       </div>
       <div class="row"><div><label>交流道語音預報</label><div class="hint">關閉後只在畫面顯示，不出聲</div></div>
         <div class="sw"><input type="checkbox" id="sIc" checked><span></span></div></div>
       <div class="row"><label>提前距離</label>
         <select id="icDist">
-          <option value="2000">2 公里</option>
-          <option value="3000" selected>3 公里</option>
+          <option value="1000">1 公里</option>
+          <option value="2000" selected>2 公里</option>
+          <option value="3000">3 公里</option>
           <option value="4000">4 公里</option>
           <option value="5000">5 公里</option>
         </select></div>
-      <input type="text" id="icUrl" placeholder="https://你的帳號.github.io/專案/data/interchanges.min.json" autocomplete="off" spellcheck="false">
-      <button class="btn wide primary" id="btnIcLoad">從網址載入交流道</button>
-      <button class="btn wide" id="btnIcFile">改用檔案匯入</button>
-      <input type="file" id="icIn" accept=".json" class="hidden">
-      <button class="btn wide sm danger" id="btnIcClear">清除交流道資料</button>
       <div class="hint" id="icMsg" style="margin-top:8px"></div>
     </div>
 
@@ -737,11 +764,32 @@ const Store=(function(){
   };
 })();
 const K=k=>'lp.'+k;
+/* 大檔（路網 1 MB 多）放 IndexedDB：localStorage 只有 5 MB 左右，還要留給照相資料。
+   沒有 IndexedDB 的環境（沙箱、私密瀏覽）就不保存，下次開啟再從網路抓。 */
+const BigStore=(function(){
+  let dbp=null;
+  const open=()=>dbp||(dbp=new Promise((res,rej)=>{
+    try{
+      const q=indexedDB.open('luleopard',1);
+      q.onupgradeneeded=()=>q.result.createObjectStore('kv');
+      q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error);
+    }catch(e){ rej(e); }
+  }));
+  const tx=(mode,fn)=>open().then(db=>new Promise((res,rej)=>{
+    const t=db.transaction('kv',mode), r=fn(t.objectStore('kv'));
+    t.oncomplete=()=>res(r&&r.result); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error);
+  }));
+  return {
+    get:k=>tx('readonly',s=>s.get(k)).catch(()=>undefined),
+    set:(k,v)=>tx('readwrite',s=>s.put(v,k)).then(()=>true,()=>false),
+    del:k=>tx('readwrite',s=>s.delete(k)).then(()=>true,()=>false)
+  };
+})();
 
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v1.9.5';
+const APP_VER='v1.9.6';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -762,9 +810,10 @@ const HAZ_API=(location.protocol==='file:'&&!window.Capacitor)? ''
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
            alertK:5,t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:DATA_BASE+'speedcams.min.json',feedAuto:true,feedLast:0,feedCount:0,
-           hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:3000,icUrl:DATA_BASE+'interchanges.min.json',icLast:0,
+           hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:2000,
            powerSave:true,powerAfterMin:5,
-           roadUrl:'',roadCount:0};
+           roadUrl:DATA_BASE+'roadgraph.min.json',roadLast:0,roadCount:0,
+           camRoadUrl:DATA_BASE+'camroads.min.json',camRoadLast:0};
 let CFG=Object.assign({},DEF,Store.get(K('cfg'),{}));
 const saveCfg=()=>Store.set(K('cfg'),CFG);
 /* 舊版的預設是「資料源網址空白、不自動更新」，而且整份 CFG 都存進裝置裡，
@@ -773,13 +822,22 @@ const saveCfg=()=>Store.set(K('cfg'),CFG);
    之後使用者自己清掉或關掉就尊重他的選擇。 */
 if(!CFG.autoData1){
   if(!CFG.feedUrl){ CFG.feedUrl=DEF.feedUrl; CFG.feedAuto=true; }
-  if(!CFG.icUrl) CFG.icUrl=DEF.icUrl;
   CFG.autoData1=1; saveCfg();
 }
 /* 以前設定頁可以填 TDX 金鑰、由手機直接連 TDX。現在改由後端代抓，
    手機上留著金鑰沒有用處、還多一份外洩風險 —— 從裝置裡清掉。 */
 if('tdxId' in CFG||'tdxSecret' in CFG||'tdxPath' in CFG){
   delete CFG.tdxId; delete CFG.tdxSecret; delete CFG.tdxPath; saveCfg();
+}
+/* 出口預報改用分方向路網（知道自己在哪條路才不會報到別條路的出口），
+   提前距離改成 2 公里（高架道路出口很密，3 公里前報會跟前一個出口混在一起）。
+   舊的交流道清單網址用不到了。 */
+if(!CFG.road2){
+  if(!CFG.roadUrl) CFG.roadUrl=DEF.roadUrl;
+  if(!CFG.camRoadUrl) CFG.camRoadUrl=DEF.camRoadUrl;
+  if(CFG.icDist===3000) CFG.icDist=2000;
+  delete CFG.icUrl; delete CFG.icLast;
+  CFG.road2=1; saveCfg();
 }
 /* 後端是之後才部署的，已經搬遷過的人也要補一次（同樣只補空白的） */
 if(!CFG.autoData2){
@@ -1212,6 +1270,8 @@ const FAST_ROAD_RE=/國道|國\d|快速|高架|台6[1-8]|交流道|系統/;
  * 沒有可信航向或車速太慢時判斷不了，一律當作是（寧可多報，不要漏報）。
  */
 function onMyRoad(c,pos,hd,kappa,sus){
+  // 0. 知道自己在哪條路、也知道照相在哪條路，而且不是同一條（17g3）
+  if(!sameRoadAsMe(c)) return false;
   // 2. 車速對不上
   if(sus!=null&&c.lim>0){
     const fastCam=FAST_ROAD_RE.test(c.name||'');
@@ -1471,6 +1531,17 @@ const Native=(function(){
     get isNative(){ try{ return !!(cap()&&cap().isNativePlatform&&cap().isNativePlatform()); }catch(e){ return false; } },
     get hasBgGeo(){ return has('BackgroundGeolocation'); },
     get hasTTS(){ return has('TextToSpeech'); },
+    get hasBaro(){ return has('Baro'); },
+    /** 氣壓高度變化（mobile/plugins/baro）。回傳 true = 這支手機有氣壓計而且開始量了 */
+    async baroStart(onChange){
+      if(!has('Baro')) return false;
+      try{
+        const r=await plugin('Baro').start();
+        if(!r||!r.available) return false;
+        await plugin('Baro').addListener('change',d=>onChange(d));
+        return true;
+      }catch(e){ return false; }
+    },
     platform(){ try{ return cap()?cap().getPlatform():'web'; }catch(e){ return 'web'; } },
 
     /** 背景定位。回傳 watcher id 供停止用。 */
@@ -1802,11 +1873,14 @@ function onPos(lat,lon,heading,speed,acc,simulated){
   powerTick(p);
   probeTick(p);
   trackPush(p); spdPush(p,now);
+  roadTrack(p);
+  paintBaro();
   evaluate(p);
   icTick(p);
   updateTrip(p);
   paintSecRow();
   paintHazRow(evaluateHazards(p));
+  hazPassTick(p);
   updateMapPos(p);
   camViewTick(p);
   drawRadar(p);
@@ -1820,6 +1894,9 @@ function onPos(lat,lon,heading,speed,acc,simulated){
 }
 
 function startGPS(){
+  // 氣壓計（只有 App 版有）：分辨高架與平面道路用，沒有也不影響其他功能
+  if(Native.hasBaro&&!BARO.avail)
+    Native.baroStart(d=>baroPush(+d.relAlt,Date.now())).then(ok=>{ BARO.avail=ok; BARO.lastPaint=0; paintBaro(); });
   // 打包成 App：用背景定位，關螢幕也持續
   if(Native.hasBgGeo){
     Native.watchPosition(loc=>{
@@ -2648,6 +2725,24 @@ const hazMeta=k=>HAZ_TYPES.find(x=>x.k===k)||HAZ_EXTRA.find(x=>x.k===k)||{k,i:'�
 /* 置信度半衰期（分鐘）。跟後端同一組數字，沒連後端時本機也能自己衰減。 */
 const HALF_LIFE={'事故':25,'車輛故障':20,'掉落物':45,'塞車':15,'施工':240,
                  '路面坑洞':720,'積水':180,'動物':20,'臨檢':60};
+/**
+ * 這件事是多久以前通報的。官方事件用官方標的發生時間（後端每次都把 t 設成現在，不能用）；
+ * 用路人回報用「最近一次有人回報／確認」的時間。不知道就回傳 null。
+ */
+function hazAgeMs(h,now){
+  const t0= h.src==='official'? h.since : (h.lastReport||h.t);
+  return t0? Math.max(0,(now||Date.now())-t0) : null;
+}
+function hazAgo(h,now){
+  const a=hazAgeMs(h,now); if(a==null) return '';
+  const m=Math.round(a/60000);
+  if(m<1) return '剛剛';
+  if(m<60) return m+'分鐘前';
+  const hh=Math.floor(m/60), mm=m%60;
+  return hh+'小時'+(mm>=10? mm+'分':'')+'前';
+}
+/** 已經超過這類事件的半衰期：塞車 15 分鐘、掉落物 45 分鐘… 很可能已經處理掉了 */
+const hazStale=(h,now)=>{ const a=hazAgeMs(h,now); return a!=null&&a>=(HALF_LIFE[h.type]||45)*60e3; };
 const SCORE_SPEAK=1.0;    // 高於此值才出聲
 const SCORE_SHOW =0.4;    // 高於此值只顯示在畫面，低於就完全不提
 
@@ -2777,17 +2872,61 @@ function announceHaz(h,d,tier){
   lastAlertAt=now;
   const dm=d<1000?Math.round(d/50)*50+'公尺':(d/1000).toFixed(1)+'公里';
   const where=h.km!=null?('，'+roadSpeak(h.road)+(h.road?' ':'')+h.km.toFixed(1)+'公里處'):'';
-  const rep=h.reports||1, who=h.src==='official'?'官方通報，':rep>=2?(rep+'人回報，'):'';
+  /* 實地回報：官方通報的塞車、掉落物，開到的時候常常已經沒了。
+     唸出「幾分鐘前通報」，駕駛自己就能判斷；超過這類事件的半衰期再提醒「可能已經排除」。 */
+  const rep=h.reports||1, ago=hazAgo(h,now);
+  const who= h.src==='official'? '官方'+ago+'通報，'
+           : rep>=2? rep+'人回報'+(ago?'，最近一次'+ago:'')+'，'
+           : ago? ago+'回報，' : '';
   let txt;
-  if(tier===1) txt='前方'+dm+'，'+who+'注意'+h.type+where;
+  if(tier===1) txt='前方'+dm+'，'+who+'注意'+h.type+where+(hazStale(h,now)?'，可能已經排除':'');
   else if(tier===2) txt='注意，'+dm+'有'+h.type+(h.lane?'，'+h.lane:'')+(rep>=3?('，'+rep+'人回報'):'');
   else txt=h.type+'就在前方'+(h.lane?'，'+h.lane:'')+'，請小心';
   Audio_.say(txt,tier===3);
   const s=hazMeta(h.type).sev;
   if(tier===1){ Audio_.beep(520,.16); Audio_.vibe(90); }
   if(tier===2){ Audio_.beep(700,.18); Audio_.vibe([100,60,100]); }
+  hazPassWatch(h,d);
   if(tier===3){ Audio_.beep(s>=3?1000:820,.26,.14); Audio_.vibe([160,70,160,70,200]); }
   return true;
+}
+
+/* ---------- 17c2. 經過之後問一下：還在嗎？ ----------
+   被動車流驗證（17e0）不用按任何東西，但只有「減速多少」一個線索。
+   經過剛剛提醒過的事件之後，畫面下方跳出兩個大按鈕「還在／已經沒有了」，
+   15 秒後自己消失。不出聲、不強迫 —— 不想按就不用理它。
+   2 個人按「已經沒有了」，這件事（包括官方通報）就不再提醒後面的車。 */
+const HPASS={watch:new Map(),card:null,hideT:null};
+function hazPassWatch(h,d){
+  const w=HPASS.watch.get(h.id);
+  if(!w) HPASS.watch.set(h.id,{h,minD:d,t:Date.now()});
+}
+function hazPassTick(pos){
+  const now=Date.now();
+  for(const [id,w] of Array.from(HPASS.watch)){
+    const d=dist(pos.lat,pos.lon,w.h.lat,w.h.lon);
+    if(d<w.minD) w.minD=d;
+    // 真的開到旁邊過（220 公尺內），而且已經離開 100 公尺以上 → 剛經過
+    if(w.minD<=220&&d>=w.minD+100){ HPASS.watch.delete(id); showPassCard(w.h); continue; }
+    if(now-w.t>15*60e3||d>8000) HPASS.watch.delete(id);   // 沒經過（轉彎走別條路了）
+  }
+}
+function showPassCard(h){
+  const c=el('passCard'); if(!c) return;
+  HPASS.card=h;
+  const ago=hazAgo(h);
+  el('passTx').textContent='剛經過：'+hazMeta(h.type).i+' '+h.type;
+  el('passSub').textContent=(h.src==='official'?'官方':'')+(ago?ago+'通報':'')+' · 現場還在嗎？';
+  c.classList.add('show');
+  clearTimeout(HPASS.hideT);
+  HPASS.hideT=setTimeout(hidePassCard,15000);
+}
+function hidePassCard(){ const c=el('passCard'); if(c) c.classList.remove('show'); HPASS.card=null; }
+function passAnswer(still){
+  const h=HPASS.card; hidePassCard();
+  if(!h) return;
+  Audio_.beep(still?700:520,.08,.05);
+  voteHazard(h,still?'confirm':'clear');
 }
 
 /* ---------- 17d. 建立回報 ---------- */
@@ -2807,6 +2946,7 @@ function makeHazard(o){
     // 後端附上的官方事件（TDX）：official='open' 讓置信度不在本機衰減掉；
     // brgTol 是方向容許角 —— 官方只給整條路的名目方向，彎道處要放寬
     official:o.official||null,src:o.src||'',brgTol:o.brgTol||null,
+    since:o.since||null,                              // 官方事件的發生時間（唸「N 分鐘前通報」用）
     mine:o.mine!==false,synced:!!o.synced};
 }
 function addHazard(o){
@@ -2951,7 +3091,7 @@ async function voteHazard(h,kind){
     if(j.removed){ removeHazard(h.id); toast('已回報清除，這筆事件已從共享清單移除'); return; }
     if(j.hazard){
       h.reports=j.hazard.reports; h.confirms=j.hazard.confirms;
-      h.expires=j.hazard.expires;
+      if(j.hazard.expires) h.expires=j.hazard.expires;      // 官方事件的回饋不帶到期時間
       if(kind==='confirm') h.iConfirmed=true;
       saveHazards(); renderHazards(); drawHazLayer();
       toast(kind==='confirm'? ('已確認，目前共 '+h.reports+' 人回報')
@@ -3149,7 +3289,9 @@ function paintHazRow(a){
   const rep=a.haz.reports||1;
   const low=(a.score!=null?a.score:hazScore(a.haz))<SCORE_SPEAK;
   if(low) row.className+=' faded';
+  const ago=hazAgo(a.haz);
   el('hazTx').textContent=a.haz.type+(low?'（待確認）':'')+(rep>=2?' · '+rep+'人回報':'')+
+    (ago?' · '+(a.haz.src==='official'?'官方':'')+ago:'')+(hazStale(a.haz)?' · 可能已排除':'')+
     (a.haz.lane?' · '+a.haz.lane:'')+
     (a.haz.km!=null?' · '+(a.haz.road?a.haz.road+' ':'')+a.haz.km.toFixed(1)+'K':'');
   el('hazDd').textContent= a.d<1000? Math.round(a.d/10)*10+'m' : (a.d/1000).toFixed(1)+'km';
@@ -3270,88 +3412,100 @@ function quickCam(kind){
 let camUndoId=null, camUndoTimer=null;
 
 /* ═══════════════════════════════════════════════════════════
-   17g1b. 交流道預報
+   17g1b. 出口預報（國道、快速道路、高架道路）
 
-   高速公路上「下一個交流道是哪裡」是駕駛真正需要的資訊 —— 決定要不要下
-   交流道通常只有幾秒鐘。到達前 3 公里播報一次名稱，剛好夠變換車道。
+   決定要不要下交流道通常只有幾秒鐘，到達前 2 公里播報一次名稱。
+   高架道路的出口很密（不到 1 公里就有兩個），所以畫面上一直顯示
+   「接下來兩個出口」與剩餘公里數，地圖上也標出來，越靠近數字越小。
 
-   資料由 etl/build_interchanges.py 從 OpenStreetMap 的 highway=motorway_junction
-   節點產生（ODbL）。沒載入時整個功能靜默，不影響其他警示。
+   只報「我正在走的這條路、這個方向」前方的出口（見 17g3 MYROAD）：
+   旁邊、底下另一條路的出口，以及對向車道的出口都不可能被算進來。
+   不確定自己在哪條路時一律不報 —— 報錯出口比不報更危險。
+   資料：etl/build_roadgraph.py 從 OpenStreetMap 產生（ODbL）。
    ═══════════════════════════════════════════════════════════ */
-const IC={items:[],loaded:false,said:new Set(),lastAt:0,hideT:null};
+const IC={said:new Map(),lastAt:0,marks:[],lostAt:0,shown:false};
 
-function loadInterchanges(arr){
-  if(!Array.isArray(arr)||!arr.length) throw new Error('交流道資料是空的');
-  // [lat, lon, 名稱, 出口編號, 路名]
-  IC.items=arr.filter(x=>Array.isArray(x)&&isFinite(x[0])&&isFinite(x[1])&&x[2]);
-  IC.loaded=IC.items.length>0;
-  IC.said.clear();
-  icStatus('已載入 '+IC.items.length+' 個交流道');
-  try{ Store.set(K('ic'),IC.items); }catch(e){}
-  return IC.items.length;
-}
-/** 交流道資料可能是 {items:[...]} 或直接就是陣列，兩種都吃 */
-const icRows=j=>Array.isArray(j)?j:(j&&Array.isArray(j.items)?j.items:null);
-async function icFetch(url){
-  const r=await fetch(url,{cache:'no-cache'});
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  const rows=icRows(await r.json());
-  if(!rows) throw new Error('格式不對：找不到 items 陣列');
-  const n=loadInterchanges(rows);
-  CFG.icLast=Date.now(); saveCfg();
-  return n;
-}
 function icStatus(m){
-  const e=el('icMsg'); if(e) e.textContent=m||'';
-  const st=el('icStat'); if(st) st.textContent= IC.loaded? IC.items.length+' 個' : '未載入';
+  const e=el('icMsg'); if(e&&m!==undefined) e.textContent=m||'';
+  const st=el('icStat');
+  if(st) st.textContent= ROADNET.v2? (ROADNET.exitCount||0)+' 個出口' : '未載入';
 }
 
-/**
- * 每次定位檢查一次「前方即將到達的交流道」。
- * 只在高速行駛（> 60 km/h）才啟用 —— 市區慢速經過交流道附近會一直誤報。
- */
-function icTick(pos){
-  if(!CFG.icNotice||!IC.loaded) return null;
-  const v=(pos.speed||0)*3.6;
-  if(v<60||pos.speedOk===false) return null;
-  const hd=(pos.headingOk===false)?null:pos.heading;
-  if(hd==null||isNaN(hd)) return null;          // 沒有可信航向就判不出前方
-  const now=Date.now();
-  const R=CFG.icDist||3000;
-  const win=R*1.25;
-  const dLat=win/111320*1.2, dLon=win/(111320*Math.max(0.2,Math.cos(rad(pos.lat))))*1.2;
+/** 出口的顯示名稱：交流道名 > 往哪裡 > 「出口」 */
+const exitLabel=e=>e.name||e.dst||'出口';
+const exitKm=d=>d>=1000? (d/1000).toFixed(1)+' km' : Math.round(d/10)*10+' m';
 
-  let best=null;
-  for(const it of IC.items){
-    if(Math.abs(it[0]-pos.lat)>dLat||Math.abs(it[1]-pos.lon)>dLon) continue;
-    const key=it[4]+'|'+it[2];
-    if(IC.said.has(key)) continue;
-    const d=dist(pos.lat,pos.lon,it[0],it[1]);
-    if(d>win) continue;
-    // 前方 ±35°：交流道就在路邊，錐形太寬會把對向或平行道路的也算進來
-    if(angDiff(bearing(pos.lat,pos.lon,it[0],it[1]),hd)>35) continue;
-    if(!best||d<best.d) best={it,d,key};
+function icTick(pos){
+  const fast=onFastRoad();
+  const now=Date.now();
+  if(!fast){
+    // 匯入匝道、定位抖一下會短暫不確定：撐 6 秒再收，不然畫面一直閃
+    if(IC.shown&&now-IC.lostAt>6000) icHide();
+    if(IC.shown&&!IC.lostAt) IC.lostAt=now;
+    return null;
   }
-  if(!best||best.d>R) return null;
-  // 跟測速警示錯開，兩個聲音不要疊在一起
-  if(now-lastAlertAt<2500||now-IC.lastAt<8000) return null;
-  IC.said.add(best.key);
+  IC.lostAt=0;
+  const ahead=exitsAhead(15000).filter(x=>x.d>=30);
+  icPaint(ahead.slice(0,2));
+
+  // ── 語音：到達前 CFG.icDist（預設 2 公里）播報一次 ──
+  const R=CFG.icDist||2000;
+  const hit=ahead.find(x=>x.d<=R&&!icSaid(x.e,now));
+  if(!hit) return null;
+  if(hit.d<250){ IC.said.set(icKey(hit.e),now); return null; }   // 已經來不及變換車道，不報
+  if(!CFG.icNotice) return null;
+  // 跟測速警示錯開，兩個聲音不要疊在一起；被擋下來的下一次定位再補
+  if(now-lastAlertAt<2500||now-IC.lastAt<4000) return null;
+  IC.said.set(icKey(hit.e),now);
   IC.lastAt=now;
-  const name=best.it[2], ref=best.it[3], road=best.it[4];
-  const km=(best.d/1000).toFixed(1).replace(/\.0$/,'');
-  const txt='前方'+km+'公里，'+(ref?'出口'+ref+'，':'')+name;
+  const e=hit.e;
+  const dd= hit.d>=950? (hit.d/1000).toFixed(1).replace(/\.0$/,'')+'公里' : Math.round(hit.d/100)*100+'公尺';
+  let txt;
+  if(e.name) txt='前方'+dd+'，'+(e.ref?'出口'+e.ref+'，':'')+e.name+(e.dst&&e.dst!==e.name?'，'+e.dst:'');
+  else if(e.dst) txt='前方'+dd+'出口，'+e.dst;          // 高架道路的出口多半只有「往哪裡」
+  else txt='前方'+dd+'有出口';
   Audio_.say(txt);
   Audio_.beep(740,.1,.07);
+  return {name:exitLabel(e),ref:e.ref,d:hit.d,txt};
+}
+const icKey=e=>e.ri+':'+e.along+':'+e.dir;
+/** 30 分鐘內報過就不再報（回程、繞一圈再經過時可以再報） */
+const icSaid=(e,now)=>{ const t=IC.said.get(icKey(e)); return t!=null&&now-t<30*60e3; };
+
+/** 狀態列＋地圖：接下來兩個出口與剩餘距離 */
+function icPaint(list){
   const row=el('icRow');
   if(row){
-    row.classList.add('show');
-    el('icTx').textContent=name+(ref?' · 出口'+ref:'');
-    el('icDd').textContent=km+' km';
-    clearTimeout(IC.hideT);
-    IC.hideT=setTimeout(()=>row.classList.remove('show'),20000);
+    if(list.length){
+      row.classList.add('show');
+      el('icTx').innerHTML=list.map((x,i)=>
+        `<span class="ex${i?' n2':''}"><b>${esc(exitLabel(x.e))}</b>${x.e.ref?'<i>'+esc(x.e.ref)+'</i>':''} <em>${exitKm(x.d)}</em></span>`).join('');
+      el('icDd').textContent='';
+    } else row.classList.remove('show');
   }
-  return {name,ref,road,d:best.d,txt};
+  IC.shown=list.length>0;
+  if(!MAP||typeof L==='undefined') return;
+  list.forEach((x,i)=>{
+    const html=`<div class="exitPin${i?' n2':''}"><div class="lb"><b>${esc(exitLabel(x.e))}</b><span>${exitKm(x.d)}</span></div><i></i></div>`;
+    let m=IC.marks[i];
+    if(!m){
+      m=L.marker([x.e.lat,x.e.lon],{icon:L.divIcon({className:'exitMk',html,iconSize:[0,0],iconAnchor:[0,0]}),
+                                    interactive:false,keyboard:false,zIndexOffset:500-i}).addTo(MAP);
+      IC.marks[i]=m;
+    } else {
+      m.setLatLng([x.e.lat,x.e.lon]);
+      const node=m.getElement&&m.getElement();
+      if(node) node.innerHTML=html;
+    }
+    // 地圖轉成車頭向前時，字要轉回正的
+    const node=m.getElement&&m.getElement();
+    const pin=node&&node.firstElementChild;
+    if(pin) pin.style.transform= MAPROT.on&&MAPROT.deg? 'rotate('+(-MAPROT.deg)+'deg)' : '';
+  });
+  for(let i=list.length;i<IC.marks.length;i++){ if(IC.marks[i]) MAP.removeLayer(IC.marks[i]); }
+  IC.marks.length=list.length;
 }
+function icHide(){ IC.lostAt=0; icPaint([]); }
 
 /* ═══════════════════════════════════════════════════════════
    17g2. 路網幾何
@@ -3360,11 +3514,32 @@ function icTick(pos){
    資料由 etl/build_roadnet.py 從 OpenStreetMap 產生（ODbL）。
    沒有載入路網時所有功能自動退回原本的直線／錐形做法。
    ═══════════════════════════════════════════════════════════ */
-const ROADNET={roads:[],grid:null,cell:0.01,loaded:false};
+const ROADNET={roads:[],grid:null,cell:0.01,loaded:false,exits:new Map(),v2:false};
+
+/**
+ * 新版（v2，etl/build_roadgraph.py）：分方向的車道鏈＋掛在鏈上的出口。
+ * 國道南下、北上是兩條不同的鏈，所以一貼上鏈就知道方向；出口只會出現在它所在的那一側。
+ * 轉成跟舊版相同的 [{id,ref,cls,pts}] 再走原本的流程，另外帶上 ow/names/to 與出口。
+ */
+function decodeRoadGraph(doc){
+  const CLSN=['國道','快速道路','省道','縣道','匝道','一般道路'];
+  const arr=doc.chains.map((c,i)=>{
+    const f=c[5], pts=[]; let la=0, lo=0;
+    for(let k=0;k<f.length;k+=2){ la+=f[k]; lo+=f[k+1]; pts.push([la/1e5,lo/1e5]); }
+    return {id:i,ref:doc.keys[c[2]]||'',cls:CLSN[c[0]]||'',link:c[0]===4,ow:c[1],
+            names:c[3].map(n=>doc.names[n]),to:c[4],pts};
+  });
+  const exits=(doc.exits||[]).map(e=>({chain:e[0],along:e[1],dir:e[2],name:e[3]||'',ref:e[4]||'',
+                                       dst:e[5]||'',lat:e[6],lon:e[7]}));
+  return {arr,exits};
+}
 
 function loadRoadNet(arr){
+  let exits=null;
+  if(arr&&arr.v===2&&Array.isArray(arr.chains)){ const g=decodeRoadGraph(arr); arr=g.arr; exits=g.exits; }
   if(!Array.isArray(arr)||!arr.length) throw new Error('路網資料是空的');
-  const roads=[], grid=new Map();
+  const roads=[], grid=new Map(), idx2=new Map();
+  const reg=(k,v)=>{ let a=grid.get(k); if(!a){ a=[]; grid.set(k,a); } a.push(v); };
   arr.forEach(r=>{
     const pts=r.pts;
     if(!Array.isArray(pts)||pts.length<2) return;
@@ -3373,16 +3548,38 @@ function loadRoadNet(arr){
     for(let i=1;i<pts.length;i++)
       cum[i]=cum[i-1]+dist(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]);
     const idx=roads.length;
-    roads.push({id:r.id,ref:r.ref,cls:r.cls||'',pts,cum,lenM:cum[cum.length-1]});
-    // 網格索引：每個線段登記到它經過的格子
+    idx2.set(r.id,idx);
+    roads.push({id:r.id,ref:r.ref,cls:r.cls||'',pts,cum,lenM:cum[cum.length-1],
+                link:!!r.link,ow:r.ow||0,names:r.names||[],to:r.to||[]});
+    // 網格索引：每個線段登記到它經過的格子。
+    // 國道簡化後一段直線可以長達好幾公里，只登記端點的話，走在線段中間會貼不到路
     for(let i=0;i<pts.length;i++){
       const gx=Math.floor(pts[i][0]/ROADNET.cell), gy=Math.floor(pts[i][1]/ROADNET.cell);
-      const k=gx+'_'+gy;
-      let a=grid.get(k); if(!a){ a=[]; grid.set(k,a); }
-      a.push([idx,i]);
+      const seen=new Set([gx+'_'+gy]);
+      reg(gx+'_'+gy,[idx,i]);
+      if(i<pts.length-1){
+        const n=Math.ceil(Math.max(Math.abs(pts[i+1][0]-pts[i][0]),Math.abs(pts[i+1][1]-pts[i][1]))/ROADNET.cell*2);
+        for(let s=1;s<n;s++){
+          const la=pts[i][0]+(pts[i+1][0]-pts[i][0])*s/n, lo=pts[i][1]+(pts[i+1][1]-pts[i][1])*s/n;
+          const k=Math.floor(la/ROADNET.cell)+'_'+Math.floor(lo/ROADNET.cell);
+          if(!seen.has(k)){ seen.add(k); reg(k,[idx,i+1]); }   // 登記成「下一點」，snap 會檢查它前後兩段
+        }
+      }
     }
   });
+  // 鏈的編號換成實際陣列位置（萬一有被略過的）
+  roads.forEach(r=>{ r.to=r.to.map(t=>idx2.get(t)).filter(t=>t!=null); });
+  const byRoad=new Map();
+  (exits||[]).forEach(e=>{
+    const ri=idx2.get(e.chain); if(ri==null) return;
+    e.ri=ri;
+    if(!byRoad.has(ri)) byRoad.set(ri,[]);
+    byRoad.get(ri).push(e);
+  });
+  byRoad.forEach(a=>a.sort((x,y)=>x.along-y.along));
   ROADNET.roads=roads; ROADNET.grid=grid; ROADNET.loaded=roads.length>0;
+  ROADNET.exits=byRoad; ROADNET.v2=!!exits; ROADNET.exitCount=(exits||[]).length;
+  MYROAD.ri=-1; MYROAD.conf=false; MYROAD.streak=0;
   return roads.length;
 }
 
@@ -3442,6 +3639,272 @@ function alongDistance(aLat,aLon,bLat,bLon){
   const A=snapToRoad(aLat,aLon), B=snapToRoad(bLat,bLon);
   if(!A||!B||A.roadIdx!==B.roadIdx) return null;
   return Math.abs(B.alongM-A.alongM);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   17g3. 我現在在哪一條路、往哪個方向
+
+   實地回報：國道底下、旁邊的快速道路也有出口，用「前方 ±35°」猜就會把
+   另一條路的出口報出來；照相也會報到隔壁那條路的。唯一可靠的做法是知道
+   自己正在走哪一條路、哪個方向。
+
+   v2 路網的國道、快速道路是「分方向」的車道鏈（南下、北上各一條），所以：
+     · 貼到鏈上而且航向跟鏈的方向一致 → 路與方向同時確定
+     · 上下重疊、並行的路（五楊與國1、市民高架與市民大道）位置幾乎一樣，
+       靠「連續性」分辨：從哪條路順著路網接過來的，就還在那條路上
+   判斷不確定時（剛開機、附近有另一條路一樣近、很久沒定位），conf=false：
+   出口一律不報、照相一律不排除（寧可多報照相，也不要漏報）。
+   ═══════════════════════════════════════════════════════════ */
+const MYROAD={ri:-1,along:0,dir:1,off:0,streak:0,clear:false,clearN:0,conf:false,pend:null,lastT:0,baro:null};
+
+/* ── 氣壓：分辨高架與平面 ──
+   不看絕對高度：天氣一變就差好幾公尺、每支手機也各有偏差。只看「上去之前」到現在升高了多少。
+   基準點：確定開在平面道路上時，一直用最新的高度當基準（跟著天氣慢慢漂）；
+   一進入高架與平面重疊、分不出來的路段，基準就停在進來前那一刻。
+   氣壓不可靠時（風大、開關車窗、空調切換造成跳動，或手機根本沒有氣壓計）就不用，
+   回到原本的軌跡追蹤 —— 氣壓只是加分，不是必要。 */
+const BARO={avail:false,samples:[],base:null,baseT:0,spikeUntil:0,state:'',lastPaint:0};
+const BARO_UP=6, BARO_FLAT=2.5, BARO_MAXAGE=5*60e3, BARO_NOISE=1.0;
+function baroPush(h,t){
+  if(!isFinite(h)) return;
+  t=t||Date.now();
+  const S=BARO.samples, prev=S[S.length-1];
+  // 1.5 秒內跳 3 公尺以上：開窗、空調、進出隧道，接下來 8 秒的讀值不採信
+  if(prev&&t-prev.t<1500&&Math.abs(h-prev.h)>3) BARO.spikeUntil=t+8000;
+  S.push({t,h});
+  while(S.length&&t-S[0].t>180000) S.shift();
+}
+/** 最近 3 秒的高度（中位數）；樣本不夠回傳 null */
+function baroNow(t){
+  const r=BARO.samples.filter(x=>t-x.t<=3000);
+  return r.length>=2? med(r.map(x=>x.h)) : null;
+}
+/** 最近 20 秒扣掉直線趨勢後的抖動（公尺）。正常行駛約 0.2～0.5，風大或車窗開著會到 1 以上 */
+function baroNoise(t){
+  const r=BARO.samples.filter(x=>t-x.t<=20000);
+  if(r.length<6) return Infinity;
+  const n=r.length, mt=r.reduce((a,x)=>a+x.t,0)/n, mh=r.reduce((a,x)=>a+x.h,0)/n;
+  let sxy=0,sxx=0; r.forEach(x=>{ sxy+=(x.t-mt)*(x.h-mh); sxx+=(x.t-mt)**2; });
+  const k=sxx? sxy/sxx : 0;
+  return Math.sqrt(r.reduce((a,x)=>a+(x.h-mh-k*(x.t-mt))**2,0)/n);
+}
+function baroUsable(t){
+  if(!BARO.avail){ BARO.state='沒有氣壓計'; return false; }
+  const last=BARO.samples[BARO.samples.length-1];
+  if(!last||t-last.t>5000){ BARO.state='沒有讀值'; return false; }
+  if(t<BARO.spikeUntil){ BARO.state='讀值跳動，暫停使用'; return false; }
+  if(baroNoise(t)>BARO_NOISE){ BARO.state='讀值不穩（風大或車窗開著），暫停使用'; return false; }
+  BARO.state='可用'; return true;
+}
+/** 'up' = 比基準高（上了高架）、'ground' = 跟基準差不多、null = 判斷不了（不用氣壓） */
+function baroLayer(t){
+  if(!baroUsable(t)||BARO.base==null) return null;
+  if(t-BARO.baseT>BARO_MAXAGE){ BARO.state='基準點太舊'; return null; }
+  const h=baroNow(t); if(h==null) return null;
+  const dh=h-BARO.base;
+  if(dh>=BARO_UP) return 'up';
+  if(Math.abs(dh)<=BARO_FLAT) return 'ground';
+  return null;
+}
+/** 高架道路（不是匝道、不是普通的橋） */
+const isElevRoad=r=>!r.link&&(/\+高架$/.test(r.ref)||/^名:.*高架道/.test(r.ref)||r.names.some(n=>/高架道/.test(n)));
+function paintBaro(){
+  const e=el('baroStat'); if(!e) return;
+  const now=Date.now(); if(now-BARO.lastPaint<2000) return; BARO.lastPaint=now;
+  if(!BARO.avail){ e.textContent= Native.isNative? '這支手機沒有氣壓計' : '網頁版無法使用'; return; }
+  baroUsable(now);
+  if(BARO.state==='可用'&&BARO.base!=null&&now-BARO.baseT>BARO_MAXAGE) BARO.state='基準點太舊（回到平面道路會重新取）';
+  else if(BARO.state==='可用'&&BARO.base==null) BARO.state='等待基準點（確定開在平面道路時取）';
+  const h=baroNow(now);
+  e.textContent=BARO.state+(BARO.base!=null&&h!=null&&BARO.state==='可用'? '（比基準 '+(h-BARO.base>=0?'+':'')+(h-BARO.base).toFixed(1)+' m）':'');
+}
+
+/** 這個位置附近，每一條路各自最近的一點 */
+function roadCands(lat,lon,maxOff){
+  const out=new Map();
+  if(!ROADNET.loaded) return out;
+  const gx=Math.floor(lat/ROADNET.cell), gy=Math.floor(lon/ROADNET.cell);
+  const seen=new Set();
+  for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
+    const a=ROADNET.grid.get((gx+dx)+'_'+(gy+dy));
+    if(!a) continue;
+    for(const [ri,pi] of a){
+      const r=ROADNET.roads[ri];
+      for(const i of [pi-1,pi]){
+        if(i<0||i>=r.pts.length-1) continue;
+        const key=ri+':'+i; if(seen.has(key)) continue; seen.add(key);
+        const {d,t}=segNearest(lat,lon,r.pts[i],r.pts[i+1]);
+        if(d>maxOff) continue;
+        const cur=out.get(ri);
+        if(!cur||d<cur.off)
+          out.set(ri,{ri,off:d,along:r.cum[i]+(r.cum[i+1]-r.cum[i])*t,
+                      brg:bearing(r.pts[i][0],r.pts[i][1],r.pts[i+1][0],r.pts[i+1][1])});
+      }
+    }
+  }
+  return out;
+}
+
+/** 每次定位呼叫一次，更新 MYROAD */
+function roadTrack(pos){
+  const M=MYROAD;
+  const lose=()=>{ M.ri=-1; M.conf=false; M.streak=0; M.clear=false; M.clearN=0; M.pend=null; return M; };
+  if(!ROADNET.v2) return lose();
+  const now=Date.now();
+  // 很久沒有定位（隧道、背景暫停）：中間可能已經換了路，重新判斷
+  if(M.lastT&&now-M.lastT>30000) lose();
+  M.lastT=now;
+  const hd=(pos.headingOk===false)?null:pos.heading;
+  const moving=hd!=null&&!isNaN(hd)&&(pos.speed||0)>3;
+  const acc=Math.min(pos.acc||15,50);
+  const cands=roadCands(pos.lat,pos.lon,Math.max(25,acc+15));
+  if(!moving){
+    // 停著或航向不可信：維持原判斷，只更新位置；原本那條路已經不在附近才放掉
+    const c=M.ri>=0? cands.get(M.ri) : null;
+    if(!c) return lose();
+    M.along=c.along; M.off=c.off;
+    return M;
+  }
+  const cur=M.ri>=0? ROADNET.roads[M.ri] : null;
+  const ok=[];
+  cands.forEach(c=>{
+    const r=ROADNET.roads[c.ri], a=angDiff(c.brg,hd);
+    let dir;
+    if(a<=40) dir=1;
+    else if(!r.ow&&a>=140) dir=-1;          // 雙向路逆著畫線方向走
+    else return;                            // 方向對不上：對向車道、交叉的路
+    let s=c.off;
+    if(c.ri===M.ri) s-=15;                  // 原本就在這條路上
+    else if(cur&&cur.to.includes(c.ri)) s-=8;   // 順著路網接過去的
+    ok.push({...c,dir,s,r});
+  });
+  if(!ok.length) return lose();
+  ok.sort((a,b)=>a.s-b.s);
+  // 高架與平面重疊、位置分不出來：問氣壓。能判斷就只留那一層的路
+  M.baro=null;
+  /* 「位置分不出來」的範圍：一般 12 公尺或定位誤差；高架與平面之間放寬到 35 公尺 ——
+     OSM 上平面道路常不在高架正下方，而是在旁邊 15～30 公尺，GPS 在高架旁又特別飄。
+     所以在高架附近，只有「從匝道一路追蹤上去」或「氣壓顯示比上去前高」才算確定。 */
+  const near=(a,b)=>b.off<=a.off+(isElevRoad(a.r)!==isElevRoad(b.r)? 35 : Math.max(12,acc));
+  const top=ok[0];
+  const mixed=ok.some(c=>near(top,c)&&isElevRoad(c.r)!==isElevRoad(top.r));
+  if(mixed){
+    const lay=baroLayer(now);
+    if(lay){
+      const keep=ok.filter(c=>c.r.link||isElevRoad(c.r)===(lay==='up'));
+      if(keep.length){ ok.length=0; ok.push(...keep); M.baro=lay; }
+    }
+  }
+  let best=ok[0];
+  const curC=ok.find(c=>c.ri===M.ri);
+  if(curC&&best!==curC){
+    // 原本那條還在附近，別條卻更近：連續兩次都這樣才換，一次的定位抖動不算
+    if(M.pend&&M.pend.ri===best.ri) M.pend.n++; else M.pend={ri:best.ri,n:1};
+    if(M.pend.n<2) best=curC;
+  } else M.pend=null;
+  if(best.ri===M.ri) M.streak++;
+  else {
+    // 順著路網接過去的（主線接主線、匝道接上高架）延續原本的信心；跳過去的重新累積
+    const carried=!!(cur&&M.conf&&cur.to.includes(best.ri));
+    M.ri=best.ri; M.pend=null;
+    M.streak=carried? 3 : 1;
+    M.clear=carried; M.clearN=0;
+  }
+  M.along=best.along; M.off=best.off; M.dir=best.dir;
+  // 附近有另一條「不同的路」跟它差不多近（上下重疊、並行）：還不能確定是哪一條
+  // 「差不多近」= 差距在 12 公尺或定位誤差以內：GPS 本身就飄這麼多，分不出來
+  const rival=ok.some(c=>c.ri!==best.ri&&c.r.ref!==best.r.ref&&near(best,c));
+  // 連續 5 筆都沒有對手才算確定：一筆剛好飄到沒有別條路的地方不算數
+  if(!rival){ if(++M.clearN>=5) M.clear=true; }
+  else if(!M.clear) M.clearN=0;
+  M.conf= M.streak>=3 && M.clear && best.off<=Math.max(20,acc+5);
+  // 確定開在平面道路上：氣壓基準跟著更新（天氣造成的漂移就這樣被吸收掉）
+  if(M.conf&&!best.r.link&&!isElevRoad(best.r)&&!M.baro&&baroUsable(now)){
+    const h=baroNow(now); if(h!=null){ BARO.base=h; BARO.baseT=now; }
+  }
+  return M;
+}
+
+/** 一個座標投影到某條鏈上，回傳沿路公尺 */
+function projectAlong(r,lat,lon){
+  let best=null;
+  for(let i=0;i<r.pts.length-1;i++){
+    const {d,t}=segNearest(lat,lon,r.pts[i],r.pts[i+1]);
+    if(!best||d<best.d) best={d,along:r.cum[i]+(r.cum[i+1]-r.cum[i])*t};
+  }
+  return best? best.along : 0;
+}
+
+/** 沿著我正在走的這條路往前，maxM 公尺內的出口（依距離排序）。不確定在哪條路時回傳空陣列。 */
+function exitsAhead(maxM){
+  const M=MYROAD;
+  if(!M.conf||M.ri<0) return [];
+  const out=[], visited=new Set();
+  let ri=M.ri, along=M.along, dir=M.dir, base=0;
+  for(let hop=0;hop<5&&ri!=null&&base<maxM;hop++){
+    visited.add(ri);
+    const r=ROADNET.roads[ri];
+    for(const e of (ROADNET.exits.get(ri)||[])){
+      if(e.dir!==dir) continue;               // 雙向路另一個方向的出口
+      const d=base+(e.along-along)*dir;
+      if(d>0&&d<=maxM) out.push({e,d});
+    }
+    if(!r.ow) break;                          // 雙向路不往下接（分不出接到哪一頭）
+    base+=r.lenM-along;
+    // 鏈在分岔處斷開：接到「同一條路、同一層」的下一條鏈繼續找
+    const end=r.pts[r.pts.length-1];
+    const nx=r.to.find(t=>!visited.has(t)&&!ROADNET.roads[t].link&&ROADNET.roads[t].ow&&ROADNET.roads[t].ref===r.ref);
+    if(nx==null) break;
+    ri=nx; along=projectAlong(ROADNET.roads[nx],end[0],end[1]); dir=1;
+  }
+  return out.sort((a,b)=>a.d-b.d);
+}
+
+/** 我正在走的是國道、快速道路或高架道路（才有「出口」可報） */
+function onFastRoad(){
+  const M=MYROAD;
+  if(!M.conf||M.ri<0) return false;
+  const r=ROADNET.roads[M.ri];
+  if(r.link) return false;
+  return r.cls==='國道'||r.cls==='快速道路'||/高架/.test(r.ref)||ROADNET.exits.has(M.ri);
+}
+
+/* ── 測速照相：是不是在我正在走的這條路上 ──
+   每支照相在哪條路，由 etl/tag_cam_roads.py 用 OSM 比對好（camroads.min.json），
+   道路身分跟路網用同一套規則（etl/roadkey.py），兩邊直接比對。 */
+let CAMROAD=new Map();   // "lat,lon" → [層, 道路, 類別, 判斷依據, 重疊區, 道路身分, 路名]
+function loadCamRoads(doc){
+  const m=doc&&doc.cams;
+  if(!m||typeof m!=='object') throw new Error('格式不對：找不到 cams');
+  CAMROAD=new Map(Object.entries(m));
+  return CAMROAD.size;
+}
+const camRoadTag=c=>CAMROAD.get((+c.lat).toFixed(5)+','+(+c.lon).toFixed(5));
+/** '國1+高架' → {refs:['國1'],elev:true}；'名:中正路' → null */
+function keyRefs(k){
+  if(!k||k.startsWith('名:')) return null;
+  const elev=k.endsWith('+高架');
+  return {refs:k.replace(/\+高架$/,'').split('/'),elev};
+}
+/**
+ * false = 確定是別條路的照相。
+ * 只有「確定自己在哪條路」而且「確定照相在哪條路」時才會回 false，其他一律 true。
+ */
+function sameRoadAsMe(c){
+  const M=MYROAD;
+  if(!M.conf||M.ri<0) return true;
+  const r=ROADNET.roads[M.ri];
+  if(r.link) return true;                    // 在匝道上：前面要併入的主線照相照報
+  const t=camRoadTag(c);
+  if(!t||t[3]==='unsure'||t[5]==null) return true;
+  const nm=c.name||'';
+  // 照相名稱直接寫了我這條路的路名（路口照相常寫「A路與B路口」）
+  if(r.names.some(n=>n.length>=2&&nm.includes(n))) return true;
+  if(t[6]&&r.names.includes(t[6])) return true;
+  const mine=keyRefs(r.ref), cam=keyRefs(t[5]);
+  if(mine&&cam) return mine.elev===cam.elev&&mine.refs.some(x=>cam.refs.includes(x));
+  if(!mine&&!cam) return r.ref===t[5];
+  return false;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -3633,6 +4096,7 @@ function upcomingCams(pos,maxKm){
   for(const c of CAMS){
     if(Math.abs(c.lat-pos.lat)>dLat||Math.abs(c.lon-pos.lon)>dLon) continue;
     if(!dirMatch(c,pos.heading)) continue;
+    if(!sameRoadAsMe(c)) continue;
     near.push(c);
   }
 
@@ -3745,17 +4209,26 @@ function renderTrip(){
 
 /* ---------- 17k. 路網載入 ---------- */
 function roadStatus(msg){
-  el('roadStat').textContent= ROADNET.loaded? (ROADNET.roads.length+' 段') : '未載入';
+  el('roadStat').textContent= !ROADNET.loaded? '未載入'
+    : ROADNET.v2? ROADNET.roads.length+' 條車道' : ROADNET.roads.length+' 段（舊版，沒有方向與出口）';
   if(msg!==undefined) el('roadMsg').textContent=msg;
 }
-function applyRoadNet(arr,label){
+function applyRoadNet(arr,label,quiet){
   const n=loadRoadNet(arr);
-  const refs=Array.from(new Set(ROADNET.roads.map(r=>r.ref))).slice(0,12);
   CFG.roadCount=n; saveCfg();
-  try{ Store.set(K('roadnet'),arr); }
-  catch(e){ toast('路網太大無法保存，本次開啟仍可使用',4000); }
-  roadStatus('✅ 已載入 '+n+' 段：'+refs.join('、')+(refs.length>=12?' …':''));
-  toast('路網已載入，前方清單改用沿路計算');
+  if(arr&&arr.v===2){
+    // 新版路網 1 MB 多，localStorage 放不下（還要留給照相資料），改存 IndexedDB
+    Store.del(K('roadnet'));
+    BigStore.set('roadgraph',arr).then(ok=>{ if(!ok&&!quiet) toast('路網無法保存到這台裝置，本次開啟仍可使用',4000); });
+    roadStatus('✅ 已載入 '+n+' 條車道、'+(ROADNET.exitCount||0)+' 個出口');
+  } else {
+    const refs=Array.from(new Set(ROADNET.roads.map(r=>r.ref))).slice(0,12);
+    try{ Store.set(K('roadnet'),arr); }
+    catch(e){ toast('路網太大無法保存，本次開啟仍可使用',4000); }
+    roadStatus('✅ 已載入 '+n+' 段：'+refs.join('、')+(refs.length>=12?' …':''));
+  }
+  icStatus('');
+  if(!quiet) toast('路網已載入');
   renderTrip();
   return n;
 }
@@ -3768,6 +4241,7 @@ async function roadLoadUrl(){
     const r=await fetch(url,{cache:'no-cache'});
     if(!r.ok) throw new Error('HTTP '+r.status);
     applyRoadNet(await r.json(),url);
+    CFG.roadLast=Date.now(); saveCfg();
   }catch(e){ roadStatus('❌ '+e.message+'（政府或第三方網址可能被 CORS 擋，改用檔案匯入）'); }
 }
 
@@ -3898,6 +4372,11 @@ function bind(){
     el('bcInput').value=''; renderTraffic(); toast('已加入播報');
   };
 
+  // ── 經過後的一鍵回報 ──
+  el('passStill').onclick=()=>passAnswer(true);
+  el('passGone').onclick=()=>passAnswer(false);
+  el('passX').onclick=hidePassCard;
+
   // ── 路網 ──
   el('roadUrl').value=CFG.roadUrl||'';
   el('btnRoadLoad').onclick=roadLoadUrl;
@@ -3908,47 +4387,20 @@ function bind(){
     catch(err){ roadStatus('❌ '+err.message); }
   };
   el('btnRoadClear').onclick=()=>{
-    ROADNET.roads=[]; ROADNET.grid=null; ROADNET.loaded=false;
-    Store.del(K('roadnet')); CFG.roadCount=0; saveCfg();
-    roadStatus('已清除，前方清單回到航向錐形判斷'); renderTrip();
+    ROADNET.roads=[]; ROADNET.grid=null; ROADNET.loaded=false; ROADNET.v2=false; ROADNET.exits=new Map(); ROADNET.exitCount=0;
+    MYROAD.ri=-1; MYROAD.conf=false; icHide();
+    Store.del(K('roadnet')); BigStore.del('roadgraph'); CFG.roadCount=0; CFG.roadUrl=''; CFG.roadLast=0; saveCfg();
+    el('roadUrl').value='';
+    roadStatus('已清除：前方清單回到航向錐形判斷，出口預報停用'); icStatus(''); renderTrip();
   };
 
   // ── 交流道 ──
   sw('sIc','icNotice');
   const icEl=el('icDist');
-  if(icEl){ icEl.value=String(CFG.icDist||3000);
-    icEl.onchange=()=>{ CFG.icDist=parseInt(icEl.value,10)||3000; saveCfg();
+  if(icEl){ icEl.value=String(CFG.icDist||2000);
+    icEl.onchange=()=>{ CFG.icDist=parseInt(icEl.value,10)||2000; saveCfg();
       icStatus('提前距離改為 '+(CFG.icDist/1000)+' 公里'); }; }
-  const icU=el('icUrl'); if(icU) icU.value=CFG.icUrl||'';
-  const applyIc=(j,label)=>{
-    const rows=icRows(j);
-    if(!rows) throw new Error('格式不對：找不到 items 陣列');
-    const n=loadInterchanges(rows);
-    CFG.icUrl=icU?icU.value.trim():''; saveCfg();
-    icStatus('✅ 已載入 '+n+' 個交流道'+(label?'（'+label+'）':''));
-  };
-  el('btnIcLoad').onclick=async()=>{
-    const u=(icU.value||'').trim();
-    if(!u){ icStatus('請先填入網址'); return; }
-    icStatus('載入中…');
-    try{
-      const r=await fetch(u,{cache:'no-store'});
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      applyIc(await r.json(),'');
-    }catch(e){ icStatus('❌ '+e.message+'（政府/GitHub 以外的網址常被 CORS 擋，可改用檔案匯入）'); }
-  };
-  el('btnIcFile').onclick=()=>el('icIn').click();
-  el('icIn').onchange=async e=>{
-    const f=e.target.files[0]; e.target.value=''; if(!f) return;
-    try{ applyIc(JSON.parse(decodeBuf(await f.arrayBuffer())),f.name); }
-    catch(err){ icStatus('❌ '+err.message); }
-  };
-  el('btnIcClear').onclick=()=>{
-    IC.items=[]; IC.loaded=false; IC.said.clear();
-    Store.del(K('ic')); CFG.icUrl=''; saveCfg();
-    if(icU) icU.value='';
-    icStatus('已清除交流道資料');
-  };
+  icStatus('');
 
   // ── 旅程 ──
   el('btnTripReset').onclick=()=>{
@@ -4155,9 +4607,24 @@ async function autoData(){
   const now=Date.now();
   try{
     if(CFG.feedAuto&&CFG.feedUrl&&now-(CFG.feedLast||0)>6*3600e3) await feedUpdate(true);
-    if(CFG.icUrl&&(!IC.loaded||now-(CFG.icLast||0)>7*864e5)){
-      try{ const n=await icFetch(CFG.icUrl); icStatus('✅ 已自動載入 '+n+' 個交流道'); }
-      catch(e){ if(!IC.loaded) icStatus('自動載入失敗：'+e.message+'（有網路時會再試）'); }
+    // 路網（出口預報、判斷自己在哪條路）與照相道路標記：每 7 天更新
+    if(CFG.roadUrl&&(!ROADNET.v2||now-(CFG.roadLast||0)>7*864e5)){
+      try{
+        const r=await fetch(CFG.roadUrl,{cache:'no-cache'});
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        applyRoadNet(await r.json(),CFG.roadUrl,true);
+        CFG.roadLast=Date.now(); saveCfg();
+      }catch(e){ if(!ROADNET.v2) roadStatus('自動載入失敗：'+e.message+'（有網路時會再試）'); }
+    }
+    if(CFG.camRoadUrl&&(!CAMROAD.size||now-(CFG.camRoadLast||0)>7*864e5)){
+      try{
+        const r=await fetch(CFG.camRoadUrl,{cache:'no-cache'});
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const j=await r.json();
+        loadCamRoads(j);
+        Store.set(K('camroads'),j.cams);
+        CFG.camRoadLast=Date.now(); saveCfg();
+      }catch(e){}
     }
   }finally{ AUTO.busy=false; }
 }
@@ -4239,8 +4706,13 @@ function boot(){
   HAZARDS=HAZARDS.filter(h=>h.expires>Date.now());
   buildKmAnchors(); renderHazKinds(); renderHazards(); renderKm(); drawHazLayer();
   try{ const rn=Store.get(K('roadnet'),null); if(rn&&rn.length) loadRoadNet(rn); }catch(e){}
-  try{ const ic=Store.get(K('ic'),null); if(ic&&ic.length) loadInterchanges(ic); else icStatus(''); }catch(e){}
-  roadStatus('');
+  BigStore.get('roadgraph').then(doc=>{
+    try{ if(doc&&!ROADNET.v2) loadRoadNet(doc); }catch(e){}
+    roadStatus(''); icStatus('');
+  });
+  try{ const cr=Store.get(K('camroads'),null); if(cr) loadCamRoads({cams:cr}); }catch(e){}
+  Store.del(K('ic'));                       // 舊版交流道清單，已由路網裡的出口取代
+  roadStatus(''); icStatus('');
   // 隔了很久才回來就當作新的一趟
   if(Date.now()-(TRIP.lastT||TRIP.startT)>3*3600e3) TRIP=newTrip();
   renderTrip();
@@ -4290,11 +4762,11 @@ function boot(){
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
              kmAtPoint,cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
-             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();secApproach.clear();SECTION=null;TRACK.length=0;SPDHIST.length=0;IC.said.clear();IC.lastAt=0;},camMin,updateTrip,
+             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();secApproach.clear();SECTION=null;TRACK.length=0;SPDHIST.length=0;IC.said.clear();IC.lastAt=0;MYROAD.ri=-1;MYROAD.conf=false;MYROAD.lastT=0;MYROAD.streak=0;},camMin,updateTrip,
              upcomingCams,renderTrip,fmtKm,fmtDur,
              openFabMenu,closeFabMenu,armFabMenu,fabMenuOpen,FAB_MENU_MS,
              passedCams,announcePassed,
-             IC,loadInterchanges,icTick,icStatus,
+             HPASS,hazAgo,hazStale,showPassCard,passAnswer,IC,icTick,icStatus,MYROAD,roadTrack,BARO,baroPush,baroLayer,isElevRoad,exitsAhead,sameRoadAsMe,loadCamRoads,CAMROAD:()=>CAMROAD,
              hazScore,scoreLabel,SCORE_SPEAK,SCORE_SHOW,HALF_LIFE,
              hazTiers,roadSpeak,evaluateHazards,extraHazards,preDist,accPad,PRE,Audio_,onMyRoad,trackCurvature,sustainedKmh,TRACK,SPDHIST,OFFICIAL,paintOfficial,addHazard,removeHazard,makeHazard,quickReport,quickCam,exifGPS,
              REPORTS:()=>REPORTS,setReports:a=>{REPORTS=a;Store.set(K('reports'),REPORTS);rebuildDB();},

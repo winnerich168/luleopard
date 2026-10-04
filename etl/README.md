@@ -1,11 +1,14 @@
 # 鹿豹 ETL · 資料前處理
 
-三支腳本，都**只用 Python 標準函式庫**，不需要 `pip install`：
+這些腳本都**只用 Python 標準函式庫**，不需要 `pip install`：
 
 | 腳本 | 做什麼 |
 |---|---|
 | `build_speedcams.py` | 把各機關的測速照相開放資料抓下來、正規化、去重，輸出 App 用的檔案 |
-| `build_roadnet.py` | 從 OpenStreetMap 抓國道與快速道路中心線，讓 App 能沿著路算距離 |
+| `build_roadgraph.py` | 從 OpenStreetMap 建立**分方向**路網與出口（`roadgraph.min.json`）。App 靠它知道自己正在走哪條路、往哪個方向，只報這條路的出口與照相 |
+| `tag_cam_roads.py` | 替每支測速照相標上所在道路與層數（`camroads.min.json`），App 拿它跟自己所在的路比對 |
+| `roadkey.py` | 上面兩支共用的「道路身分」規則（國1／國1+高架／台64／名:中正路）—— 兩邊一定要一致才比對得起來 |
+| `build_roadnet.py` | （舊）國道與快速道路中心線，已由 `build_roadgraph.py` 取代 |
 | `geocode_tainan.py` | 把臺南「民族路二段與西門路口」這種文字地址轉成座標 |
 
 ---

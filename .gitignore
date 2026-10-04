@@ -11,3 +11,4 @@ __pycache__/
 *.jks
 .DS_Store
 etl/downloads/camroads/
+etl/downloads/roadgraph/

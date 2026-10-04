@@ -1,0 +1,13 @@
+{
+  "name": "luleopard-baro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "鹿豹 · 氣壓高度變化（iOS CMAltimeter／Android 氣壓感測器），用來分辨高架與平面道路",
+  "main": "index.js",
+  "files": ["index.js", "ios/", "android/", "LuleopardBaro.podspec"],
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": { "@capacitor/core": "^6.0.0" }
+}

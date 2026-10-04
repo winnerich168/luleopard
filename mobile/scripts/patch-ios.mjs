@@ -51,6 +51,9 @@ setString('NSLocationAlwaysAndWhenInUseUsageDescription',
   '鹿豹需要在背景取得位置，才能在你關閉螢幕或使用其他 App（例如導航）時，仍持續語音提醒前方的測速照相與路況。');
 setString('NSLocationAlwaysUsageDescription',
   '鹿豹需要在背景取得位置，才能在你關閉螢幕或使用其他 App（例如導航）時，仍持續語音提醒前方的測速照相與路況。');
+/* 氣壓高度（CMAltimeter）。沒有這句，iOS 一呼叫就直接讓 App 閃退。 */
+setString('NSMotionUsageDescription',
+  '鹿豹用手機的氣壓計判斷你是不是開上了高架道路，才不會把高架上方或底下另一條路的出口與測速照相報給你。');
 
 /* ── 背景模式 ──
    location：背景持續收定位
@@ -130,7 +133,7 @@ if (existsSync(podPath)) {
 
 /* ── 驗證 ── */
 const must = ['NSLocationWhenInUseUsageDescription', 'NSLocationAlwaysAndWhenInUseUsageDescription',
-              'ITSAppUsesNonExemptEncryption'];
+              'NSMotionUsageDescription', 'ITSAppUsesNonExemptEncryption'];
 const miss = must.filter(k => !p.includes(`<key>${k}</key>`));
 const bg = (p.match(bgRe) || [, ''])[1];
 MODES.forEach(m => { if (!bg.includes(`<string>${m}</string>`)) miss.push('UIBackgroundModes/' + m); });

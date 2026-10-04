@@ -64,18 +64,19 @@ jobs:
         #   避免某天政府網站改版導致抓到空檔、把好資料覆蓋掉。
         #   第一次跑完請看 Summary 的實際點數，再把門檻調到約正常值的 70%。
 
-      # 路網幾何：資料量大且很少變動，只在每月 1 號或手動觸發時重建
-      - name: 建立路網幾何（每月一次）
+      # 分方向路網＋出口：App 靠它判斷「正在走哪條路、哪個方向」，
+      # 只報這條路的出口與照相。資料量大且很少變動，每月 1 號或手動觸發時重建。
+      - name: 建立分方向路網與出口（每月一次）
         if: github.event_name == 'workflow_dispatch' || startsWith(github.event.schedule, '0 22')
         continue-on-error: true          # Overpass 忙碌時不要害整個流程失敗
         run: |
-          if [ ! -f docs/data/roadnet.min.json ] || [ "$(date +%d)" = "01" ]; then
-            python3 etl/build_roadnet.py --out docs/data --classes motorway,trunk
+          if [ ! -f docs/data/roadgraph.min.json ] || [ "$(date +%d)" = "01" ]; then
+            python3 etl/build_roadgraph.py --out docs/data --fail-under 800
           else
             echo "路網已存在且不是月初，略過"
           fi
 
-      # 交流道：資料量小、幾乎不變動，跟路網一樣每月重建一次就好
+      # 舊版 App（v1.9.5 以前）用的交流道清單；新版改用上面路網裡的出口
       - name: 建立交流道資料（每月一次）
         continue-on-error: true          # Overpass 忙碌時不要害整個流程失敗
         run: |
@@ -89,7 +90,7 @@ jobs:
         if: always()
         run: |
           cat docs/data/report.md >> $GITHUB_STEP_SUMMARY
-          [ -f docs/data/roadnet.report.md ] && cat docs/data/roadnet.report.md >> $GITHUB_STEP_SUMMARY || true
+          [ -f docs/data/roadgraph.report.md ] && cat docs/data/roadgraph.report.md >> $GITHUB_STEP_SUMMARY || true
           [ -f docs/data/interchanges.report.md ] && cat docs/data/interchanges.report.md >> $GITHUB_STEP_SUMMARY || true
 
       - name: 上傳報告當作 artifact

@@ -102,7 +102,7 @@ const fs = require('fs');
   // 各種路況來源都要唸
   ok('一鍵回報的事故有播報', done.some(t => /事故，國道1號/.test(t)));
   ok('回報頁的施工有播報', done.some(t => /施工/.test(t)));
-  ok('回報頁的施工從遠到近', done.some(t => /^前方\d+公尺，注意施工/.test(t)) && done.some(t => /^施工就在前方/.test(t)));
+  ok('回報頁的施工從遠到近', done.some(t => /^前方\d+公尺，(\d+分鐘前回報，)?注意施工/.test(t)) && done.some(t => /^施工就在前方/.test(t)));
   ok('官方事件有播報', done.some(t => /官方通報/.test(t)) && done.filter(t => /事故就在前方/.test(t)).length >= 2);
   ok('第一聲只唸一次', done.filter(t => /^前方\d+公尺，測速照相/.test(t)).length === 1);
   ok('沒有頁面錯誤', errs.length === 0);

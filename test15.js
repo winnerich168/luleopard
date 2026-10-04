@@ -2,7 +2,7 @@
    1. 通過固定測速照相後，畫面距離不但沒消失還繼續往上加（看起來像有正負號）
       → 改成明確記錄「這一趟已通過」，之後一律不再選它
    2. 通過時要語音提示「已通過」
-   3. 高速公路上提前 3 公里播報下一個交流道名稱
+   （原本的第 3 項「交流道預報」改由 test26 測試）
 */
 const { chromium } = require('playwright');
 const path = require('path');
@@ -79,70 +79,7 @@ const path = require('path');
              畫面: document.getElementById('alertDist').textContent };
   });
 
-  /* ── 交流道預報 ── */
-  const IC_FIXTURE = [
-    [24.5000, 120.8000, '頭份交流道', '36', '國道1號'],
-    [24.4000, 120.7500, '苗栗交流道', '41', '國道1號'],
-  ];
-
-  R.交流道 = await page.evaluate(async fx => {
-    LP.CFG.icNotice = true; LP.CFG.icDist = 3000; LP.CFG.voice = true;
-    LP.loadInterchanges(fx);
-    LP.resetTrip(); LP.GPS.last = null;
-    window.__spoken.length = 0;
-    const IC0 = fx[0];
-    const log = [];
-    // 從北邊 6 公里外往南開向頭份交流道，時速 100
-    for (let d = 6000; d >= 500; d -= 280) {
-      window.__clock += 10000;                       // 280 m / 時速100 ≈ 10 秒
-      LP.onPos(IC0[0] + d / 111320, IC0[1], 180, 100 / 3.6, 8, true);
-      await new Promise(r => setTimeout(r, 10));
-      const said = window.__spoken.slice(-1)[0];
-      if (said && /交流道/.test(said) && !log.some(x => x.語音 === said))
-        log.push({ 距離: Math.round(d), 語音: said });
-    }
-    return { 播報: log, 畫面列: document.getElementById('icRow').classList.contains('show'),
-             畫面文字: document.getElementById('icTx').textContent };
-  }, IC_FIXTURE);
-
-  /* 低速（市區）不該播報交流道 */
-  R.低速不報 = await page.evaluate(async fx => {
-    LP.loadInterchanges(fx); LP.resetTrip(); LP.GPS.last = null;
-    window.__spoken.length = 0;
-    const IC0 = fx[0];
-    for (let d = 5000; d >= 500; d -= 100) {
-      window.__clock += 9000;                        // 100 m / 時速40 = 9 秒
-      LP.onPos(IC0[0] + d / 111320, IC0[1], 180, 40 / 3.6, 8, true);   // 時速 40
-      await new Promise(r => setTimeout(r, 6));
-    }
-    return { 語音數: window.__spoken.filter(t => /交流道/.test(t)).length };
-  }, IC_FIXTURE);
-
-  /* 同一個交流道只報一次 */
-  R.只報一次 = await page.evaluate(async fx => {
-    LP.loadInterchanges(fx); LP.resetTrip(); LP.GPS.last = null;
-    window.__spoken.length = 0;
-    const IC0 = fx[0];
-    for (let d = 4000; d >= 200; d -= 60) {
-      window.__clock += 2200;                        // 60 m / 時速100 ≈ 2.2 秒
-      LP.onPos(IC0[0] + d / 111320, IC0[1], 180, 100 / 3.6, 8, true);
-      await new Promise(r => setTimeout(r, 6));
-    }
-    return { 頭份播報次數: window.__spoken.filter(t => /頭份/.test(t)).length };
-  }, IC_FIXTURE);
-
-  /* 沒載入資料時完全靜默，不影響其他功能 */
-  R.沒資料時 = await page.evaluate(async () => {
-    LP.IC.items = []; LP.IC.loaded = false;
-    LP.resetTrip(); LP.GPS.last = null;
-    window.__spoken.length = 0;
-    for (let i = 0; i < 10; i++) {
-      window.__clock += 8000;
-      LP.onPos(24.5 + i * 0.002, 120.8, 180, 100 / 3.6, 8, true);
-      await new Promise(r => setTimeout(r, 6));
-    }
-    return { 交流道語音: window.__spoken.filter(t => /交流道/.test(t)).length, 有錯誤: false };
-  });
+  /* 交流道（出口）預報改由 test26 測試：只報正在走的那條路、2 公里前、地圖顯示兩個出口 */
 
   R.errors = errs;
   console.log(JSON.stringify(R, null, 2));
@@ -160,14 +97,6 @@ const path = require('path');
   ok('關閉提示後仍正確排除（不是靠提示才排除）', R['關閉通過提示'].過後顯示.length === 0);
   ok('通過後定位跳回前方也不會復活', R.不會復活.跳回前方後又出聲 === 0 && !R.不會復活.畫面);
 
-  ok('交流道有播報', R.交流道.播報.length >= 1);
-  ok('交流道在 3 公里左右播報', R.交流道.播報[0] && R.交流道.播報[0].距離 <= 3100 && R.交流道.播報[0].距離 >= 2400);
-  ok('播報內容含名稱與出口編號',
-     R.交流道.播報[0] && /頭份交流道/.test(R.交流道.播報[0].語音) && /出口36/.test(R.交流道.播報[0].語音));
-  ok('畫面也顯示交流道列', R.交流道.畫面列 && /頭份/.test(R.交流道.畫面文字));
-  ok('市區低速不播報交流道', R.低速不報.語音數 === 0);
-  ok('同一個交流道只報一次', R.只報一次.頭份播報次數 === 1);
-  ok('沒載入交流道資料時完全靜默', R.沒資料時.交流道語音 === 0);
   ok('沒有 JS 錯誤', errs.length === 0);
 
   console.log(fails.length ? '✗ 失敗：\n  ' + fails.join('\n  ') : '✓ test15（通過提示與交流道預報）全部通過');

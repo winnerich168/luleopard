@@ -13,7 +13,8 @@ const fs = require('fs');
 
 const SITE = 'https://winnerich168.github.io/luleopard/';
 const HTML = fs.readFileSync(path.join(__dirname, 'luleopard.html'), 'utf8');
-const IC_JSON = fs.readFileSync(path.join(__dirname, 'docs/data/interchanges.min.json'), 'utf8');
+const RG_JSON = fs.readFileSync(path.join(__dirname, 'docs/data/roadgraph.min.json'), 'utf8');
+const CR_JSON = fs.readFileSync(path.join(__dirname, 'docs/data/camroads.min.json'), 'utf8');
 const CAM_JSON = fs.readFileSync(path.join(__dirname, 'docs/data/speedcams.min.json'), 'utf8');
 
 async function open(browser, { legacyCfg, fileUrl } = {}) {
@@ -27,7 +28,8 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
     if (/leaflet.*\.css/.test(u)) return r.fulfill({ contentType: 'text/css', body: '' });
     if (u.startsWith(SITE + 'data/')) {
       hits.push(u.slice(SITE.length));
-      if (u.endsWith('interchanges.min.json')) return r.fulfill({ contentType: 'application/json', body: IC_JSON });
+      if (u.endsWith('roadgraph.min.json')) return r.fulfill({ contentType: 'application/json', body: RG_JSON });
+      if (u.endsWith('camroads.min.json')) return r.fulfill({ contentType: 'application/json', body: CR_JSON });
       if (u.endsWith('speedcams.min.json')) return r.fulfill({ contentType: 'application/json', body: CAM_JSON });
       return r.fulfill({ status: 404, body: '' });
     }
@@ -58,46 +60,30 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
   {
     const { page, errs, hits } = await open(browser);
     R.新使用者 = await page.evaluate(() => ({
-      點數: LP.CAMS().length, 交流道: LP.IC.items.length, 已載入: LP.IC.loaded,
-      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl, hazUrl: LP.CFG.hazUrl,
+      點數: LP.CAMS().length, 出口: LP.ROADNET.exitCount || 0, 路網v2: LP.ROADNET.v2, 照相道路: LP.CAMROAD().size,
+      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, roadUrl: LP.CFG.roadUrl, hazUrl: LP.CFG.hazUrl,
       交流道狀態: document.getElementById('icStat').textContent }));
     R.新使用者.請求 = hits; R.新使用者.errors = errs;
-
-    /* 交流道 3 公里前播報：往北開向一個交流道 */
-    R.交流道播報 = await page.evaluate(async () => {
-      await new Promise(r => setTimeout(r, 1000));
-      const it = LP.IC.items.find(x => x[2] && x[0] > 24 && x[0] < 25);
-      LP.CFG.useSeed = false; LP.clearPacks();        // 避開測速警示的節流
-      LP.resetTrip(); window.__said = [];
-      const M = 1 / 111320, v = 100 / 3.6;
-      let at = null;
-      for (let d = 4200; d > 1500; d -= v) {
-        LP.onPos(it[0] - d * M, it[1], 0, v, 5, false);
-        if (at == null && window.__said.some(t => t.includes(it[2]))) at = Math.round(d);
-        await new Promise(r => setTimeout(r, 5));
-      }
-      return { 名稱: it[2], 語音: window.__said.filter(t => t.includes('交流道')), 播報時距離: at };
-    });
     await page.context().close();
   }
 
   /* 2. 舊使用者：裝置裡存著「網址空白、自動更新關閉」的舊設定 */
   {
-    const { page, errs } = await open(browser, { legacyCfg: { feedUrl: '', feedAuto: false, icUrl: '', voice: true,
+    const { page, errs } = await open(browser, { legacyCfg: { feedUrl: '', feedAuto: false, icUrl: '', icDist: 3000, voice: true,
       tdxId: 'old-id', tdxSecret: 'old-secret', tdxPath: 'https://x' } });
     R.舊使用者 = await page.evaluate(() => ({
-      點數: LP.CAMS().length, 交流道: LP.IC.items.length,
-      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, icUrl: LP.CFG.icUrl, hazUrl: LP.CFG.hazUrl,
+      點數: LP.CAMS().length, 出口: LP.ROADNET.exitCount || 0, icDist: LP.CFG.icDist,
+      feedUrl: LP.CFG.feedUrl, feedAuto: LP.CFG.feedAuto, hazUrl: LP.CFG.hazUrl,
       舊金鑰已清除: !('tdxId' in LP.CFG) && !/old-secret/.test(localStorage.getItem('lp.cfg')),
       沒有金鑰輸入欄: !document.getElementById('tdxId') && !document.getElementById('tdxSecret') }));
     R.舊使用者.errors = errs;
     await page.context().close();
   }
 
-  /* 3. 已經搬遷過、又自己清掉交流道的人：尊重他的選擇，不再自動抓 */
+  /* 3. 已經搬遷過、又自己清掉路網與資料源的人：尊重他的選擇，不再自動抓 */
   {
-    const { page, hits } = await open(browser, { legacyCfg: { autoData1: 1, icUrl: '', feedUrl: '', feedAuto: false } });
-    R.自己關掉 = await page.evaluate(() => ({ 交流道: LP.IC.items.length, 點數: LP.CAMS().length }));
+    const { page, hits } = await open(browser, { legacyCfg: { autoData1: 1, road2: 1, roadUrl: '', camRoadUrl: '', feedUrl: '', feedAuto: false } });
+    R.自己關掉 = await page.evaluate(() => ({ 出口: LP.ROADNET.exitCount || 0, 點數: LP.CAMS().length }));
     R.自己關掉.請求 = hits;
     await page.context().close();
   }
@@ -154,12 +140,12 @@ async function open(browser, { legacyCfg, fileUrl } = {}) {
   const fails = [];
   const ok = (n, c) => { if (!c) fails.push(n); };
   ok('新使用者自動載入全台點位', R.新使用者.點數 > 1500);
-  ok('新使用者自動載入交流道', R.新使用者.已載入 && R.新使用者.交流道 > 400);
+  ok('新使用者自動載入分方向路網與出口', R.新使用者.路網v2 && R.新使用者.出口 > 800 && /個出口/.test(R.新使用者.交流道狀態));
+  ok('新使用者自動載入照相道路標記', R.新使用者.照相道路 > 1500);
   ok('預設開啟自動更新', R.新使用者.feedAuto === true && /speedcams\.min\.json$/.test(R.新使用者.feedUrl));
-  ok('交流道有播報', R.交流道播報.語音.length >= 1);
-  ok('交流道在 3 公里左右播報', R.交流道播報.播報時距離 != null && Math.abs(R.交流道播報.播報時距離 - 3000) <= 150);
-  ok('舊使用者也自動補上資料源', R.舊使用者.點數 > 1500 && R.舊使用者.交流道 > 400 && R.舊使用者.feedAuto === true);
-  ok('自己清掉的不再自動抓', R.自己關掉.交流道 === 0 && R.自己關掉.請求.length === 0);
+  ok('舊使用者也自動補上資料源與路網', R.舊使用者.點數 > 1500 && R.舊使用者.出口 > 800 && R.舊使用者.feedAuto === true);
+  ok('舊使用者的出口提前距離從 3 公里改成 2 公里', R.舊使用者.icDist === 2000);
+  ok('自己清掉的不再自動抓', R.自己關掉.出口 === 0 && R.自己關掉.請求.length === 0);
   ok('file:// 不自動連網', R.本機開檔.請求.length === 0);
   // 共享回報後端：網站上預設連線；file:// 絕不預設，否則跑測試會把假回報灌進正式資料庫
   const API = 'https://luleopard-hazards.winnerich.workers.dev';

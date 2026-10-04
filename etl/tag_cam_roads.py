@@ -15,7 +15,7 @@ App 會把另一層的照相報出來（例如在國道上一路報「速限 50�
 
 輸入：../docs/data/speedcams.min.json   [[lat, lon, 速限, 方向, 名稱], ...]
 輸出（預設 dist/）：
-    camroads.min.json    {"lat,lon": [層, 道路, 類別, 判斷依據, 是否重疊區], ...}
+    camroads.min.json    {"lat,lon": [層, 道路, 類別, 判斷依據, 是否重疊區, 道路身分, 路名], ...}
     camroads.report.md   統計：多少支在高架、多少支在重疊區、多少支對不到道路
 
 只用 Python 標準函式庫。
@@ -23,6 +23,9 @@ App 會把另一層的照相報出來（例如在國道上一路報「速限 50�
 
 import argparse, json, math, os, re, sys, time, urllib.request, urllib.parse
 from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from roadkey import road_key                                  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -178,7 +181,8 @@ def tag_one(cam, ways):
         if other and best["s"] - other["s"] < 1.0:
             why = "unsure"
     cls = t.get("highway", "")
-    return [best["lvl"], road, cls, why, 1 if overlap else 0]
+    # 道路身分（跟 build_roadgraph.py 同一套規則），App 拿它比對「是不是我正在走的路」
+    return [best["lvl"], road, cls, why, 1 if overlap else 0, road_key(t), (t.get("name") or "").strip()]
 
 # ── Overpass ─────────────────────────────────────────────────
 def overpass(q, tries=6):
@@ -265,7 +269,7 @@ def main():
 
     with open(os.path.join(a.out, "camroads.min.json"), "w", encoding="utf-8") as f:
         json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "near_m": NEAR_M,
-                   "fields": ["層", "道路", "類別", "判斷依據", "重疊區"], "cams": result},
+                   "fields": ["層", "道路", "類別", "判斷依據", "重疊區", "道路身分", "路名"], "cams": result},
                   f, ensure_ascii=False, separators=(",", ":"))
 
     lines = ["# 測速照相道路與層數標記", "",

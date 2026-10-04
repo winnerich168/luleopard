@@ -285,6 +285,34 @@ async function handleReport(env, req) {
   return json({ ok: true, merged: false, hazard: publicShape(h) });
 }
 
+/* ── 官方事件的用路人回饋 ──
+   官方事件不存在 hazards 表裡（它在 meta 的官方清單），以前對它按「已經清掉了」會回 404。
+   官方清單常常比現場慢：東西早就撿走了、塞車早就散了，官方還掛著。
+   所以另外記一份用路人的回饋：2 個人說清掉了、或 3 台車經過都沒減速，就先不提供這筆，
+   直到官方清單更新出新的事件為止。
+   全部官方事件的回饋存成 meta 的同一筆（查附近時只多讀這一筆，不是每個事件各讀一次）。 */
+const OFFICIAL_VOTES_KEY = 'official_votes';
+const OFFICIAL_VOTE_TTL = 3 * 3600e3;            // 回饋保留 3 小時，之後當作沒人回饋過
+const NO_VOTES = { clears: 0, stills: 0, probeClear: 0, probeStill: 0 };
+async function officialVotesAll(env) {
+  const all = (await Store.meta(env, OFFICIAL_VOTES_KEY)) || {};
+  const now = Date.now();
+  for (const k of Object.keys(all)) if (now - (all[k].t || 0) > OFFICIAL_VOTE_TTL) delete all[k];
+  return all;
+}
+const officialHiddenByUsers = v => (v.clears || 0) >= CLEAR_THRESHOLD || (v.probeClear || 0) - (v.probeStill || 0) >= 3;
+async function officialFeedback(env, id, field) {
+  const all = await officialVotesAll(env);
+  const v = all[id] || { ...NO_VOTES };
+  v[field] = (v[field] || 0) + 1;
+  // 有人說「還在」，把「清掉了」的票抵掉一張：現場剛好又出事、或前一個人看錯
+  if (field === 'stills' && v.clears > 0) v.clears--;
+  v.t = Date.now();
+  all[id] = v;
+  await Store.setMeta(env, OFFICIAL_VOTES_KEY, all, OFFICIAL_VOTE_TTL);
+  return v;
+}
+
 async function handleVote(env, req, id, kind) {
   let b = {};
   try { b = await req.json(); } catch { /* 允許空 body */ }
@@ -292,6 +320,11 @@ async function handleVote(env, req, id, kind) {
   if (!isFinite(lat) || !isFinite(lon)) return json({ error: '需要 lat 與 lon 以定位事件' }, 400);
 
   const now = Date.now();
+  if (id.startsWith('o-')) {
+    const v = await officialFeedback(env, id, kind === 'confirm' ? 'stills' : 'clears');
+    if (officialHiddenByUsers(v)) return json({ ok: true, removed: true, official: true });
+    return json({ ok: true, official: true, hazard: { id, clears: v.clears, confirms: v.stills, reports: 1 + v.stills } });
+  }
   const h = await Store.get(env, id);
   if (!h || h.expires <= now) return json({ error: '找不到這筆事件（可能已過期）' }, 404);
 
@@ -349,6 +382,11 @@ async function handleProbe(env, req, id) {
   if (!isFinite(lat) || !isFinite(lon)) return json({ error: '需要 lat 與 lon 以定位事件' }, 400);
 
   const now = Date.now();
+  if (id.startsWith('o-')) {
+    const v = await officialFeedback(env, id, b.slowed ? 'probeStill' : 'probeClear');
+    if (officialHiddenByUsers(v)) return json({ ok: true, removed: true, reason: '車流顯示已排除', official: true });
+    return json({ ok: true, official: true });
+  }
   const h = await Store.get(env, id);
   if (!h || h.expires <= now) return json({ error: 'not found' }, 404);
 
@@ -571,10 +609,13 @@ async function officialNear(env, lat, lon, r, userHazards, now) {
   const o = await Store.meta(env, OFFICIAL_KEY);
   if (!o || !Array.isArray(o.items) || now - o.t > OFFICIAL_STALE_MS) return { list: [], t: 0 };
   const out = [];
+  const votes = o.items.length ? await officialVotesAll(env) : {};
   for (const x of o.items) {
     const d = distM(lat, lon, x.lat, x.lon);
     if (d > r) continue;
     if (userHazards.some(u => u.type === x.type && distM(u.lat, u.lon, x.lat, x.lon) <= OFFICIAL_DEDUPE_M)) continue;
+    const v = votes[x.id] || NO_VOTES;
+    if (officialHiddenByUsers(v)) continue;          // 現場的人說已經沒有了
     out.push({
       id: x.id, type: x.type, lat: x.lat, lon: x.lon,
       road: x.road, roadClass: x.roadClass, dir: x.dir, km: x.km,
@@ -585,8 +626,10 @@ async function officialNear(env, lat, lon, r, userHazards, now) {
       note: x.note, lane: '',
       // 時間用「這次提供的時間」：它在官方清單上就是進行中，不該在客戶端自己衰減掉
       t: now, lastReport: now, expires: now + 20 * 60e3,
-      confirms: 0, clears: 0, reports: 1, score: 1.5,
-      probes: { clear: 0, still: 0 },
+      // since：官方標的事件發生時間。App 唸「N 分鐘前通報」靠這個（t 是這次提供的時間，永遠是現在）
+      since: x.since || null,
+      confirms: v.stills || 0, clears: v.clears || 0, reports: 1 + (v.stills || 0), score: 1.5,
+      probes: { clear: v.probeClear || 0, still: v.probeStill || 0 },
       official: 'open', src: 'official',
       dist: Math.round(d),
     });
