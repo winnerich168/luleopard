@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
   s.author = 'winnerich168'
   s.source = { :git => 'https://github.com/winnerich168/luleopard.git', :tag => s.version.to_s }
   s.source_files = 'ios/Sources/**/*.{swift,h,m}'
-  s.ios.deployment_target = '15.0'
+  s.ios.deployment_target = '13.0'
   s.dependency 'Capacitor'
   s.frameworks = 'CoreMotion'
   s.swift_version = '5.1'
