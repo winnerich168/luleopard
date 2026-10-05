@@ -46,6 +46,10 @@ window.__drive = (startLat, lon, kmh, totalM, stepM) => {
     '台9線129k+404m至136k+883m': LP.parseSection('宜蘭縣南澳鄉 台9線129k+404m至136k+883m(觀音隧道)'),
     '110k+960m至108k+224m': LP.parseSection('南澳鄉台9線110k+960m至蘇澳鎮台9線108k+224m(東澳隧道)'),
     '國道5號 15K-28K': LP.parseSection('宜蘭縣 國道5號南下 15K-28K'),
+    '只有後面寫單位 8.5-13.7K': LP.parseSection('屏東縣 車城鄉 台26線尖山段8.5-13.7K'),
+    '只有前面寫單位 126.13K至129.61': LP.parseSection('臺東縣 成功鎮 臺11線126.13K至129.61(小馬)'),
+    '中間夾括號 9.92K(…)至3.94K': LP.parseSection('臺東縣 達仁鄉 臺9戊線9.92K(壽卡休憩亭)至3.94K森永區間測速'),
+    '門牌不是里程(應為null)': LP.parseSection('高雄市 大樹區 大樹區竹寮路60-1號前(台29線91.1K)'),
     '沒寫範圍(應為null)': LP.parseSection('新竹縣新豐鄉 台15線鳳鼻隧道'),
     '一般測速點(應為null)': LP.parseSection('新竹縣竹北市 中華路與興隆路口'),
   }));

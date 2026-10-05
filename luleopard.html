@@ -3925,15 +3925,24 @@ function sameRoadAsMe(c){
 function parseSection(name){
   if(!name) return null;
   const s=String(name);
-  // 一個里程數字：47.5K / 68k+600m / 82.2公里
-  const one='(\\d{1,3}(?:\\.\\d+)?)\\s*(?:[Kk](?![a-z])|公里)(?:\\s*\\+\\s*(\\d{1,3})\\s*[Mm公尺])?';
+  // 一個里程數字：47.5K / 68k+600m / 82.2公里；單位那段單獨抓出來，才知道有沒有寫
+  // 後面接「線、號、段…」的是路名裡的數字（台9線、6段），不是里程
+  const one='(\\d{1,3}(?:\\.\\d+)?)\\s*([Kk](?![a-z])|公里)?(?:\\s*\\+\\s*(\\d{1,3})\\s*[Mm公尺])?(?![\\d.線號段巷路弄])';
+  // 第一個里程和「至」之間可能夾著地名或「主線」：「9.92K(壽卡休憩亭)至3.94K」「7.9K主線至4.5K」
+  const gap='\\s*(?:[(（][^)）]{0,12}[)）]|主線)?\\s*';
   // 「至」和第二個里程之間可能還夾著路名，例如
   // 「南澳鄉台9線110k+960m至蘇澳鎮台9線108k+224m」
-  const re=new RegExp(one+'\\s*(?:至|到|~|-|–|—)\\s*.{0,16}?'+one);
-  const m=s.match(re);
+  const re=new RegExp(one+gap+'(?:至|到|~|-|–|—)\\s*(.{0,16}?)'+one,'g');
+  // 實際資料常只有一邊寫單位：「8.5-13.7K」「129.61至126.13K」「177至168.1公里」。
+  // 至少一邊有單位才算，兩邊都沒有的（例如「309巷-1275巷」）不是里程。
+  // 第一個沒寫單位時，第二個必須緊接在「至」後面，
+  // 否則「竹寮路60-1號前(台29線91.1K)」會被當成 60K 到 91.1K。
+  const bad=m=> !m[2]&&(!m[6]||m[4]);
+  let m;
+  while((m=re.exec(s))&&bad(m)) re.lastIndex=m.index+1;
   if(!m) return null;
-  const a=parseFloat(m[1])+(m[2]?parseInt(m[2],10)/1000:0);
-  const b=parseFloat(m[3])+(m[4]?parseInt(m[4],10)/1000:0);
+  const a=parseFloat(m[1])+(m[3]?parseInt(m[3],10)/1000:0);
+  const b=parseFloat(m[5])+(m[7]?parseInt(m[7],10)/1000:0);
   if(!isFinite(a)||!isFinite(b)) return null;
   const len=Math.abs(b-a);
   if(len<=0.05||len>60) return null;                 // 太短或太長都當作解析失敗
