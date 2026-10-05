@@ -50,7 +50,9 @@ window.__drive = (startLat, lon, kmh, totalM, stepM) => {
     '只有前面寫單位 126.13K至129.61': LP.parseSection('臺東縣 成功鎮 臺11線126.13K至129.61(小馬)'),
     '中間夾括號 9.92K(…)至3.94K': LP.parseSection('臺東縣 達仁鄉 臺9戊線9.92K(壽卡休憩亭)至3.94K森永區間測速'),
     '門牌不是里程(應為null)': LP.parseSection('高雄市 大樹區 大樹區竹寮路60-1號前(台29線91.1K)'),
-    '沒寫範圍(應為null)': LP.parseSection('新竹縣新豐鄉 台15線鳳鼻隧道'),
+    '沒寫里程但查得到 鳳鼻隧道(應為2250)': LP.parseSection('新竹縣新豐鄉 台15線鳳鼻隧道'),
+    '辛亥隧道(應為495)': LP.parseSection('臺北市 辛亥隧道區間測速'),
+    '沒寫範圍也查不到(應為null)': LP.parseSection('某縣 某某隧道'),
     '一般測速點(應為null)': LP.parseSection('新竹縣竹北市 中華路與興隆路口'),
   }));
 
@@ -143,7 +145,7 @@ window.__drive = (startLat, lon, kmh, totalM, stepM) => {
   R.noLength = await page.evaluate(() => {
     LP.clearPacks(); LP.resetTrip();
     window.__clock += 30 * 60e3;
-    LP.addPack('無長度', [[24.20, 121.00, 60, '南北雙向(區間測速)', '新竹縣新豐鄉 台15線鳳鼻隧道']]);
+    LP.addPack('無長度', [[24.20, 121.00, 60, '南北雙向(區間測速)', '某縣 某某隧道']]);
     window.__drive(24.20 + 300 / 111320, 121.00, 70, 1500, 50);
     const s = LP.SECTION();
     return s ? { avg: Math.round(s.avg), lengthM: s.lengthM, remainM: s.remainM,

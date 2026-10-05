@@ -804,7 +804,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261005.2328';
+const APP_BUILD='20261005.2346';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -3930,10 +3930,35 @@ function sameRoadAsMe(c){
      「台3線82.2公里至84.3公里」  → 長度 2.1 公里
    ═══════════════════════════════════════════════════════════ */
 
-/** 從名稱解析區間的起訖里程。回傳 {fromKm,toKm,lengthM} 或 null（有些沒寫範圍）。 */
+/* 開放資料完全沒寫里程的區間（只寫隧道名或路口），長度查自警察局公告與新聞（2026-10）。
+   兩個方向長度不同時取長的：App 以為比實際短會提早說「結束」，駕駛可能在區間內就加速；
+   取長的頂多晚一點報結束。資料改版若名稱變了就對不到，會退回「長度未知」。 */
+const SECTION_KNOWN=[
+  [/辛亥隧道/,                 495],   // 隧道全長 495 m
+  [/自強隧道/,                 917],   // 南往北 917 m、北往南 859 m
+  [/仁水隧道/,                3000],   // 約 3 公里（OSM 量 2963 m）
+  [/中仁隧道/,                4800],   // 約 4.8 公里
+  [/鳳鼻尾?隧道/,             2250],   // 隧道全長 2250 m，偵測長度約 2.2 公里
+  [/松藝路/,                  1300],   // 區間約 1.3 公里
+  [/向上路6段.*自立路/,       1694],   // 1694.2 m
+  [/環河路.*白馬寺/,          1500],   // 各來源 1.2～1.5 公里
+  [/萬壽路一段/,              1300],   // 往龜山 1.2、往迴龍 1.3 公里
+  [/青山路二段/,              1800],   // 往龜山 1.6、往新莊 1.8 公里
+  [/台62甲線3號隧道.*東海街/, 3280],   // 2024 延長後 3.28 公里
+];
+
+/** 從名稱解析區間的起訖里程。回傳 {fromKm,toKm,lengthM}，
+ *  名稱沒寫里程但在 SECTION_KNOWN 裡的回傳 {fromKm:null,toKm:null,lengthM}，都沒有就 null。 */
 function parseSection(name){
   if(!name) return null;
   const s=String(name);
+  const r=parseSectionKm(s);
+  if(r) return r;
+  const k=SECTION_KNOWN.find(([re])=>re.test(s));
+  return k? {fromKm:null,toKm:null,lengthM:k[1]} : null;
+}
+
+function parseSectionKm(s){
   // 一個里程數字：47.5K / 68k+600m / 82.2公里；單位那段單獨抓出來，才知道有沒有寫
   // 後面接「線、號、段…」的是路名裡的數字（台9線、6段），不是里程
   const one='(\\d{1,3}(?:\\.\\d+)?)\\s*([Kk](?![a-z])|公里)?(?:\\s*\\+\\s*(\\d{1,3})\\s*[Mm公尺])?(?![\\d.線號段巷路弄])';
@@ -3970,7 +3995,7 @@ function sectionEnter(cam,pos){
   const back= v>2? Math.min(past/v,30)*1000 : 0;
   SECTION={cam, name:cam.name, limit:cam.lim||0,
            lengthM: info? info.lengthM : null,
-           range: info? (info.fromKm+'K → '+info.toKm+'K') : '',
+           range: info&&info.fromKm!=null? (info.fromKm+'K → '+info.toKm+'K') : '',
            startT:Date.now()-back, distM: back? past : 0, lastLat:pos.lat, lastLon:pos.lon,
            warned:false, over:false};
   const km=SECTION.lengthM? (SECTION.lengthM/1000).toFixed(1)+'公里' : '';
