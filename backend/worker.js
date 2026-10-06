@@ -11,6 +11,7 @@
  *   POST /hazards/:id/retract           回報者本人撤銷（立即生效，不用投票）
  *   POST /hazards/:id/probe             被動車流探針（App 自動送，使用者不用操作）
  *   GET  /stats                         簡單統計
+ *   POST /ping                          使用統計心跳 { device }（只進後台，見 scripts/stats.sh）
  *
  * 自動下架機制（不需要有人顧後台）：
  *   1. 置信度隨時間依類型半衰期衰減
@@ -200,8 +201,34 @@ const Store = {
   async sweep(env, now) {
     await env.DB.prepare('DELETE FROM hazards WHERE expires < ?1').bind(now - 3600e3).run();
     await env.DB.prepare('DELETE FROM meta WHERE exp IS NOT NULL AND exp < ?1').bind(now).run();
+    await env.DB.prepare('DELETE FROM online WHERE last < ?1').bind(now - 86400e3).run();
+    await env.DB.prepare('DELETE FROM daily_dev WHERE day < ?1').bind(twDay(now - 90 * 86400e3)).run();
   },
 };
+
+/**
+ * 使用統計心跳。App 開著（前景或正在定位）時每 60 秒打一次。
+ * 只存裝置代號的雜湊與時間；ONLINE_MS 內有心跳就算在線。
+ * 每次順便更新當天的使用裝置數與同時在線高峰，所以不用另外跑排程。
+ */
+const ONLINE_MS = 2 * 60e3;
+const twDay = t => new Date(t + 8 * 3600e3).toISOString().slice(0, 10);
+async function handlePing(env, req) {
+  let b;
+  try { b = await req.json(); } catch { return json({ error: 'JSON 格式錯誤' }, 400); }
+  const device = clean(b && b.device, 64);
+  if (!device || device.length < 4) return json({ error: '缺少裝置代號' }, 400);
+  const dev = shortHash(device), now = Date.now(), day = twDay(now);
+  await env.DB.prepare('INSERT OR REPLACE INTO online (dev, last) VALUES (?1, ?2)').bind(dev, now).run();
+  await env.DB.prepare('INSERT OR IGNORE INTO daily_dev (day, dev) VALUES (?1, ?2)').bind(day, dev).run();
+  const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM online WHERE last > ?1').bind(now - ONLINE_MS).first();
+  const n = r ? r.n : 1;
+  await env.DB.prepare(
+    'INSERT INTO daily (day, peak, peak_at) VALUES (?1, ?2, ?3) ' +
+    'ON CONFLICT(day) DO UPDATE SET peak = excluded.peak, peak_at = excluded.peak_at WHERE excluded.peak > daily.peak')
+    .bind(day, n, now).run();
+  return json({ ok: true });
+}
 
 async function handleQuery(env, url) {
   const lat = parseFloat(url.searchParams.get('lat'));
@@ -656,6 +683,7 @@ export default {
 
       if (req.method === 'GET' && (p === '/hazards' || p === '/')) return handleQuery(env, url);
       if (req.method === 'POST' && p === '/report') return handleReport(env, req);
+      if (req.method === 'POST' && p === '/ping') return handlePing(env, req);
 
       const m = p.match(/^\/hazards\/([A-Za-z0-9-]{4,40})\/(confirm|clear)$/);
       if (req.method === 'POST' && m) return handleVote(env, req, m[1], m[2]);
@@ -677,7 +705,7 @@ export default {
       }
       return json({ error: 'not found', paths: ['/hazards', '/report',
         '/hazards/:id/confirm', '/hazards/:id/clear',
-        '/hazards/:id/retract', '/hazards/:id/probe', '/stats'] }, 404);
+        '/hazards/:id/retract', '/hazards/:id/probe', '/ping', '/stats'] }, 404);
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }

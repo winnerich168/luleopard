@@ -804,7 +804,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261005.2346';
+const APP_BUILD='20261006.2133';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -3148,6 +3148,18 @@ async function pullHazards(pos,silent){
     if(!silent) toast('取得路況失敗：'+e.message,4000); return -1; }
 }
 
+/**
+ * 匿名使用統計：App 開著（畫面在前景，或正在定位）時每 60 秒送一次心跳。
+ * 只帶裝置代號，不帶位置；後端存雜湊，只在後台看（backend 的 scripts/stats.sh），畫面上不顯示。
+ */
+function pingOnline(){
+  const base=(CFG.hazUrl||'').replace(/\/+$/,'');
+  // 自動化測試（navigator.webdriver）不送，免得灌進正式統計
+  if(!base||navigator.webdriver||(document.hidden&&GPS.watch==null)) return;
+  fetch(base+'/ping',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({device:deviceId()})}).catch(()=>{});
+}
+
 /* ---------- 17f. 照片 EXIF 取座標（不保存照片） ---------- */
 function exifGPS(buf){
   const dv=new DataView(buf);
@@ -4800,6 +4812,10 @@ function boot(){
   // 自動抓資料：開啟時先跑一次，之後每 5 分鐘檢查（各自有更新間隔，不會每次都下載）
   setTimeout(autoData,1500);
   setInterval(autoData,5*60e3);
+  // 匿名使用統計心跳（只進後台）
+  setTimeout(pingOnline,3000);
+  setInterval(pingOnline,60e3);
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pingOnline(); });
   // 對外測試介面
   window.LP={evaluate,dist,bearing,dirHeadings,dirMatch,onPos,CAMS:()=>CAMS,CFG,tierDist,feedUpdate,
              parseKmName,buildKmAnchors,kmEstimate,kmLock,kmToLatLon,kmChoices,KM,

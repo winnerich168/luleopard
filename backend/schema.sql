@@ -23,3 +23,26 @@ CREATE TABLE IF NOT EXISTS meta (
   v   TEXT NOT NULL,
   exp INTEGER             -- 毫秒時間戳；NULL = 不過期
 );
+
+-- 使用統計（只有後台看，App 畫面不顯示）
+--   App 開著時每 60 秒 POST /ping，只帶匿名裝置代號；這裡存的是代號的雜湊
+--   查詢：scripts/stats.sh
+CREATE TABLE IF NOT EXISTS online (
+  dev  TEXT PRIMARY KEY,
+  last INTEGER NOT NULL      -- 最後一次心跳（毫秒）
+);
+CREATE INDEX IF NOT EXISTS idx_online_last ON online(last);
+
+-- 每天出現過的裝置（算每日使用人數），保留 90 天
+CREATE TABLE IF NOT EXISTS daily_dev (
+  day TEXT NOT NULL,         -- 台灣時間 YYYY-MM-DD
+  dev TEXT NOT NULL,
+  PRIMARY KEY (day, dev)
+);
+
+-- 每天同時在線的高峰
+CREATE TABLE IF NOT EXISTS daily (
+  day     TEXT PRIMARY KEY,
+  peak    INTEGER NOT NULL,
+  peak_at INTEGER NOT NULL
+);

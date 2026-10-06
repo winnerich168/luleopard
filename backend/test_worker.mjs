@@ -391,6 +391,32 @@ console.log('\n── 免費額度（這次換 D1 的原因）──');
   t('排程清掉過期的冷卻紀錄', (await metaGet(e2, 'c:olddev')) === null);
 }
 
+console.log('\n── 使用統計心跳 /ping ──');
+{
+  const e3 = { DB: makeD1() };
+  const ping = async device => (await worker.fetch(new Request(BASE + '/ping', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ device }) }), e3));
+  t('缺裝置代號回 400', (await ping('')).status === 400);
+  const ok = await ping('dabc12345');
+  t('心跳回 200 且帶 CORS', ok.status === 200 && ok.headers.get('access-control-allow-origin') === '*');
+  await ping('dabc12345');                       // 同一台重複心跳不重複計
+  await ping('dxyz98765');
+  const rows = (await e3.DB.prepare('SELECT dev FROM online').all()).results;
+  t('在線表存雜湊、不存原始代號', rows.length === 2 && !rows.some(r => r.dev === 'dabc12345'), rows);
+  const dd = (await e3.DB.prepare('SELECT COUNT(*) AS n FROM daily_dev').first()).n;
+  t('當天使用裝置數 2', dd === 2, dd);
+  const pk = await e3.DB.prepare('SELECT peak FROM daily').first();
+  t('同時在線高峰 2', pk && pk.peak === 2, pk);
+  // 原本兩台都離線了，再來一台：高峰不能被往下覆蓋成 1
+  await e3.DB.prepare('UPDATE online SET last = ?1').bind(Date.now() - 10 * 60e3).run();
+  await ping('dnew00001');
+  t('高峰只升不降', (await e3.DB.prepare('SELECT peak FROM daily').first()).peak === 2);
+  // 排程清掉一天以上沒心跳的裝置
+  await e3.DB.prepare('UPDATE online SET last = ?1').bind(Date.now() - 2 * 86400e3).run();
+  const w = []; await worker.scheduled({}, e3, { waitUntil: p => w.push(p) }); await Promise.all(w);
+  t('排程清掉一天沒心跳的裝置', (await e3.DB.prepare('SELECT COUNT(*) AS n FROM online').first()).n === 0);
+}
+
 console.log('\n── 沒綁資料庫時要講清楚 ──');
 {
   const res = await worker.fetch(new Request(BASE + '/hazards?lat=25&lon=121'), {});
