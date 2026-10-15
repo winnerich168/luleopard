@@ -228,9 +228,10 @@ textarea{resize:vertical;min-height:74px}
 #icRow .tx{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;gap:12px}
 #icRow .dd{font-variant-numeric:tabular-nums;font-weight:700;color:#7fc2ff}
 #icRow .ex{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#icRow .ex b{color:#ffd84d}
 #icRow .ex i{font-style:normal;font-size:11px;margin-left:3px;padding:0 4px;border-radius:4px;background:#2a5c8f;color:#fff}
 #icRow .ex em{font-style:normal;font-weight:800;font-variant-numeric:tabular-nums;color:#7fc2ff}
-#icRow .ex.n2{opacity:.75}
+#icRow .ex.n2{opacity:.8}
 /* 地圖上的出口標籤：點在出口位置，標籤在上方；地圖旋轉時由程式把它轉回正 */
 .exitMk{background:none;border:none}
 .exitPin{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
@@ -239,6 +240,7 @@ textarea{resize:vertical;min-height:74px}
 .exitPin .lb{position:absolute;left:0;bottom:10px;transform:translateX(-50%);white-space:nowrap;
   background:#1565c0;color:#fff;border:2px solid #fff;border-radius:8px;padding:3px 8px;
   font:600 13px/1.25 system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.45);text-align:center}
+.exitPin .lb b{color:#ffd84d}
 .exitPin .lb span{display:block;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
 .exitPin.n2 .lb{background:#3d6ea3;font-size:12px}
 .exitPin.n2 .lb span{font-size:13px}
@@ -804,7 +806,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261006.2133';
+const APP_BUILD='20261015.0945';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -3458,6 +3460,19 @@ function icStatus(m){
 
 /** 出口的顯示名稱：交流道名 > 往哪裡 > 「出口」 */
 const exitLabel=e=>e.name||e.dst||'出口';
+/** 畫面用的簡稱（語音照念全名）：「中和交流道」→「中和」、「下塔悠出口匝道」→「下塔悠」、
+ *  「往中壢（南）、台北（北）」→「往中壢」。系統、服務區保留，不然看不出不是一般出口 */
+function exitShort(e){
+  if(e.name){
+    const n=e.name.replace(/(交流道|出口匝道|平交匝道|出口)$/,'');
+    return n||e.name;
+  }
+  if(e.dst){
+    const d=e.dst.replace(/[（(][^）)]*[）)]/g,'').split(/[、,，;；\/／]/)[0].trim();
+    return d||e.dst;
+  }
+  return '出口';
+}
 const exitKm=d=>d>=1000? (d/1000).toFixed(1)+' km' : Math.round(d/10)*10+' m';
 
 function icTick(pos){
@@ -3504,14 +3519,14 @@ function icPaint(list){
     if(list.length){
       row.classList.add('show');
       el('icTx').innerHTML=list.map((x,i)=>
-        `<span class="ex${i?' n2':''}"><b>${esc(exitLabel(x.e))}</b>${x.e.ref?'<i>'+esc(x.e.ref)+'</i>':''} <em>${exitKm(x.d)}</em></span>`).join('');
+        `<span class="ex${i?' n2':''}"><b>${esc(exitShort(x.e))}</b>${x.e.ref?'<i>'+esc(x.e.ref)+'</i>':''} <em>${exitKm(x.d)}</em></span>`).join('');
       el('icDd').textContent='';
     } else row.classList.remove('show');
   }
   IC.shown=list.length>0;
   if(!MAP||typeof L==='undefined') return;
   list.forEach((x,i)=>{
-    const html=`<div class="exitPin${i?' n2':''}"><div class="lb"><b>${esc(exitLabel(x.e))}</b><span>${exitKm(x.d)}</span></div><i></i></div>`;
+    const html=`<div class="exitPin${i?' n2':''}"><div class="lb"><b>${esc(exitShort(x.e))}</b><span>${exitKm(x.d)}</span></div><i></i></div>`;
     let m=IC.marks[i];
     if(!m){
       m=L.marker([x.e.lat,x.e.lon],{icon:L.divIcon({className:'exitMk',html,iconSize:[0,0],iconAnchor:[0,0]}),
@@ -4009,7 +4024,7 @@ function sectionEnter(cam,pos){
            lengthM: info? info.lengthM : null,
            range: info&&info.fromKm!=null? (info.fromKm+'K → '+info.toKm+'K') : '',
            startT:Date.now()-back, distM: back? past : 0, lastLat:pos.lat, lastLon:pos.lon,
-           warned:false, over:false};
+           lastT:pos.t||Date.now(), offSince:0, warned:false, over:false};
   const km=SECTION.lengthM? (SECTION.lengthM/1000).toFixed(1)+'公里' : '';
   Audio_.say('進入區間測速'+(km?('，全長'+km):'')+(cam.lim?('，速限'+cam.lim):''));
   Audio_.beep(700,.18); Audio_.vibe([90,60,90]);
@@ -4018,8 +4033,21 @@ function sectionEnter(cam,pos){
 
 function sectionUpdate(pos){
   if(!SECTION) return null;
-  const d=dist(SECTION.lastLat,SECTION.lastLon,pos.lat,pos.lon);
-  if(d>0){ SECTION.distM+=d; SECTION.lastLat=pos.lat; SECTION.lastLon=pos.lon; }
+  /* 實地回報：人在國3 上，卻顯示「區間 速限60 平均 1061」—— 是橋下新店環河路的區間。
+     GPS 弱的時候還分不出在哪條路就進了區間；之後確定自己在別條路，這個區間就要取消。
+     連續 8 秒確定不在照相那條路上才取消，匝道、交會處短暫判斷錯不會誤取消。 */
+  const now=Date.now();
+  if(!sameRoadAsMe(SECTION.cam)){
+    if(!SECTION.offSince) SECTION.offSince=now;
+    else if(now-SECTION.offSince>8000) return sectionCancel();
+  } else SECTION.offSince=0;
+  /* 距離只累加合理的位移：定位差時會一下跳好幾百公尺再跳回來，全部加進去平均就破千。
+     誤差超過 100 公尺的定位不採用；每一步最多算時速 250 公里能走的距離 */
+  if((pos.acc||0)<=100){
+    const t=pos.t||now, dt=Math.max(0.5,(t-SECTION.lastT)/1000);
+    const d=dist(SECTION.lastLat,SECTION.lastLon,pos.lat,pos.lon);
+    if(d>0){ SECTION.distM+=Math.min(d,dt*70); SECTION.lastLat=pos.lat; SECTION.lastLon=pos.lon; SECTION.lastT=t; }
+  }
   const el_=Math.max(1,(Date.now()-SECTION.startT)/1000);          // 秒
   SECTION.avg=SECTION.distM/el_*3.6;                                // km/h
   SECTION.elapsed=el_;
@@ -4050,6 +4078,16 @@ function sectionUpdate(pos){
     }
   }
   return SECTION;
+}
+
+/** 不是這條路的區間：不唸結果、不記進本趟紀錄（那不是真的跑過） */
+function sectionCancel(){
+  if(!SECTION) return null;
+  SECTION=null;
+  Audio_.say('剛才的區間測速不在這條路上，已取消');
+  toast('區間測速不在你這條路上，已取消',4000);
+  saveTrip(); renderTrip();
+  return null;
 }
 
 function sectionExit(completed){
@@ -4124,6 +4162,8 @@ function updateTrip(pos){
       if(!c.sec) continue;
       if(Math.abs(c.lat-pos.lat)>0.003||Math.abs(c.lon-pos.lon)>0.004){ secApproach.delete(c.id); continue; }
       if(!dirMatch(c,pos.heading)) continue;
+      // GPS 弱（誤差 50 公尺以上）分不出是橋上還是橋下，寧可不起算
+      if((pos.acc||0)>50){ secApproach.delete(c.id); continue; }
       // 旁邊另一條路的區間起點不算（實地回報：明明沒有區間測速卻報「進入區間」）
       if(!onMyRoad(c,pos,pos.headingOk===false?null:pos.heading,trackCurvature(),sustainedKmh())){ secApproach.delete(c.id); continue; }
       const d=dist(pos.lat,pos.lon,c.lat,c.lon);
@@ -4825,7 +4865,7 @@ function boot(){
              ROADNET,loadRoadNet,snapToRoad,alongDistance,roadDirSign,segNearest,
              kmAtPoint,cnNum,parseSection,sectionEnter,sectionUpdate,sectionExit,SECTION:()=>SECTION,
              // 開新旅程時也清掉「已警示到第幾級」，同一趟才不會因為狀態殘留而不出聲
-             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();secApproach.clear();SECTION=null;TRACK.length=0;SPDHIST.length=0;IC.said.clear();IC.lastAt=0;MYROAD.ri=-1;MYROAD.conf=false;MYROAD.lastT=0;MYROAD.streak=0;},camMin,updateTrip,
+             TRIP:()=>TRIP,resetTrip:()=>{TRIP=newTrip();nearCam.clear();state.clear();passedCams.clear();camMin.clear();secApproach.clear();SECTION=null;TRACK.length=0;SPDHIST.length=0;IC.said.clear();IC.lastAt=0;MYROAD.ri=-1;MYROAD.conf=false;MYROAD.lastT=0;MYROAD.streak=0;},camMin,updateTrip,exitShort,
              upcomingCams,renderTrip,fmtKm,fmtDur,
              openFabMenu,closeFabMenu,armFabMenu,fabMenuOpen,FAB_MENU_MS,
              passedCams,announcePassed,
