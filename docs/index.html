@@ -806,7 +806,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261015.0945';
+const APP_BUILD='20261015.1835';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -984,10 +984,49 @@ function dirHeadings(s){
 }
 function dirMatch(cam,heading){
   if(!CFG.dirFilter) return true;
+  const nom=nominalDirMatch(cam);
+  if(nom!=null) return nom;
   if(heading==null||isNaN(heading)) return true;
   const hs=cam.hd;
   if(!hs) return true;
   return hs.some(h=>angDiff(h,heading)<=DIR_TOL);
+}
+/**
+ * 國道、快速道路照相寫的「南向／北向／東向／西向」是整條路的名目方向，不是羅盤方向。
+ * 實地回報：國3 新店→土城實際往西開（航向 271°），「國道三號南向 39.3 公里」跟 180° 差 91°，
+ * 被當成對向，整支沒報。
+ * 確定自己在哪條國道、而且照相也在這條國道上時，改看「我順著這條路走，整條鏈是往南還是往北」：
+ * 鏈從頭到尾的南北（東西）位移就是名目方向。位移太小（短鏈、繞圈）判斷不了，回傳 null 退回羅盤。
+ * 回傳 true／false／null（不適用）。
+ */
+const CN_NUM={'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+/** 「國道一號五楊高架南向44.6公里」→ {refs:['國1'],elev:true}；不是國道回傳 null */
+function camNameRef(nm){
+  const m=String(nm||'').match(/國道([一二三四五六七八九十]{1,3}|\d{1,2})號/);
+  if(!m) return null;
+  let n=m[1];
+  if(!/^\d+$/.test(n)){
+    n= n.length===1? CN_NUM[n] : n[0]==='十'? 10+CN_NUM[n[1]] : n.length===2? CN_NUM[n[0]]*10 : CN_NUM[n[0]]*10+CN_NUM[n[2]];
+  }
+  return {refs:['國'+(+n)],elev:/五楊|汐五|高架/.test(nm)};
+}
+function nominalDirMatch(cam){
+  const hs=cam.hd;
+  if(!hs||hs.length!==1||hs[0]%90) return null;
+  const M=MYROAD;
+  if(!M.conf||M.ri<0||!ROADNET.roads) return null;
+  const r=ROADNET.roads[M.ri];
+  if(!r||r.link||(r.cls!=='國道'&&r.cls!=='快速道路')||!r.pts||r.pts.length<2) return null;
+  const t=camRoadTag(cam);
+  // 道路標記不確定時，改用名稱上寫的「國道N號」（五楊、汐五、高架算高架那層）
+  const cr= t&&t[3]!=='unsure'&&t[5]? keyRefs(t[5]) : camNameRef(cam.name);
+  const mine=keyRefs(r.ref);
+  if(!mine||!cr||mine.elev!==cr.elev||!mine.refs.some(x=>cr.refs.includes(x))) return null;
+  const a=r.pts[0], b=r.pts[r.pts.length-1], sg=M.dir<0?-1:1;
+  const dN=(b[0]-a[0])*111320*sg, dE=(b[1]-a[1])*111320*Math.cos(rad(a[0]))*sg;
+  const h=hs[0], along= h===0? dN : h===180? -dN : h===90? dE : -dE;
+  if(Math.abs(h===0||h===180? dN : dE)<5000) return null;
+  return along>0;
 }
 
 /* ---------- 6. 資料庫 ---------- */
@@ -2800,9 +2839,10 @@ function deviceId(){
  *         塞車時自動縮短，飆車時自動拉長，比固定公里數合理。
  * 一般道路：有紅綠燈與路口，500 公尺前提醒就夠，太早反而變雜訊。
  */
-function hazTiers(h,v){
+function hazTiers(h,v,fast){
   const cl=x=>Math.max(x[1],Math.min(x[2],x[0]));
-  if(isFastRoad(h.roadClass)) return [cl([v*90,1500,5000]),cl([v*45,800,2500]),cl([v*15,300,900])];
+  if(fast==null) fast=isFastRoad(h.roadClass);
+  if(fast) return [cl([v*90,1500,5000]),cl([v*45,800,2500]),cl([v*15,300,900])];
   return [Math.max(500,v*30),Math.max(250,v*15),Math.max(100,v*6)];
 }
 
@@ -2826,9 +2866,23 @@ function extraHazards(now){
   return out;
 }
 
+/* 已經唸到第幾級：id → {tier, t}。
+   實地回報：一般道路上同一筆施工每隔一百多公尺就重唸一次。以前只要有一筆定位不符條件
+   （等紅燈車速掉下來警示範圍跟著縮、轉彎時航向偏掉）就把紀錄清掉，下一筆又從第一級唸起。
+   現在只有真的離開很遠（HAZ_FORGET_M）或 30 分鐘後才忘記，暫時不符條件只是這一輪不報。 */
 const hazState=new Map();
+const HAZ_FORGET_M=7000, HAZ_FORGET_MS=30*60e3;
+/** 我現在是不是在國道／快速道路上：路網確定就用路網，不確定回傳 null */
+function meOnFast(){
+  const M=MYROAD;
+  if(!M.conf||M.ri<0||!ROADNET.roads||!ROADNET.roads[M.ri]) return null;
+  if(ROADNET.roads[M.ri].link) return null;          // 匝道上：前後兩種路都有可能
+  return onFastRoad();
+}
 function evaluateHazards(pos){
   const {lat,lon,heading}=pos, v=pos.speed||0, now=Date.now();
+  const myFast=meOnFast();
+  for(const [id,st] of hazState) if(now-st.t>HAZ_FORGET_MS) hazState.delete(id);
   let best=null;
   for(const h of HAZARDS.concat(extraHazards(now))){
     if(h.expires<=now||h.hidden) continue;
@@ -2836,17 +2890,20 @@ function evaluateHazards(pos){
     const sc=hazScore(h,now);
     if(sc<SCORE_SHOW) continue;
     h._score=sc;
-    const T=hazTiers(h,v), far=T[0]*1.3;
-    const dLat=far/111320*1.2, dLon=far/(111320*Math.max(0.2,Math.cos(rad(lat))))*1.2;
+    const dLat=HAZ_FORGET_M/111320, dLon=HAZ_FORGET_M/(111320*Math.max(0.2,Math.cos(rad(lat))));
     if(Math.abs(h.lat-lat)>dLat||Math.abs(h.lon-lon)>dLon){ hazState.delete(h.id); continue; }
     const d=dist(lat,lon,h.lat,h.lon);
-    if(d>far){ hazState.delete(h.id); continue; }
+    if(d>HAZ_FORGET_M){ hazState.delete(h.id); continue; }
+    /* 官方事件標了路別：確定我在一般道路，國道／快速道路的施工就不是我這條路的（反過來也一樣）。
+       實地回報：人在一般道路，國道施工 1.5 公里外就開始唸。用路人回報的路別不一定準，不套用 */
+    if(h.src==='official'&&myFast!=null&&myFast!==isFastRoad(h.roadClass)) continue;
+    // 警示距離看「我現在開的路」：在一般道路上就用一般道路的距離
+    const T=hazTiers(h,v,myFast), far=T[0]*1.3;
+    if(d>far) continue;
     // 對向車道的事件不要報
-    if(CFG.dirFilter&&h.brg!=null&&heading!=null&&!isNaN(heading)&&angDiff(h.brg,heading)>(h.brgTol||70)){
-      hazState.delete(h.id); continue; }
+    if(CFG.dirFilter&&h.brg!=null&&heading!=null&&!isNaN(heading)&&angDiff(h.brg,heading)>(h.brgTol||70)) continue;
     // 必須在前方
-    if(heading!=null&&!isNaN(heading)&&v>1.5&&angDiff(bearing(lat,lon,h.lat,h.lon),heading)>85){
-      hazState.delete(h.id); continue; }
+    if(heading!=null&&!isNaN(heading)&&v>1.5&&angDiff(bearing(lat,lon,h.lat,h.lon),heading)>85) continue;
     let tier=0;
     if(d<=T[2]) tier=3; else if(d<=T[1]) tier=2; else if(d<=T[0]) tier=1;
     if(!tier) continue;
@@ -2858,16 +2915,16 @@ function evaluateHazards(pos){
        ||(rep===best.rep&&d<best.d)))))) best={haz:h,d,tier,sev,rep};
   }
   if(best){
-    const prev=hazState.get(best.haz.id)||0;
+    const st=hazState.get(best.haz.id), prev=st? st.tier : 0;
     const sc=best.haz._score!=null?best.haz._score:hazScore(best.haz,now);
     best.score=sc;
     if(best.tier>prev){
       if(sc>=SCORE_SPEAK){
         // 置信度高 → 完整語音警示
-        if(announceHaz(best.haz,best.d,best.tier)) hazState.set(best.haz.id,best.tier);
+        if(announceHaz(best.haz,best.d,best.tier)) hazState.set(best.haz.id,{tier:best.tier,t:now});
       }else{
         // 置信度中等 → 只在畫面顯示，不出聲，不干擾駕駛
-        hazState.set(best.haz.id,best.tier);
+        hazState.set(best.haz.id,{tier:best.tier,t:now});
       }
     }
   }

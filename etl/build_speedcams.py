@@ -26,6 +26,9 @@ from collections import defaultdict, OrderedDict
 from datetime import datetime, timezone, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import freeway_check                                          # noqa: E402
 TPE = timezone(timedelta(hours=8))
 
 # 政府網站對 python-urllib 的 UA 常直接回 403，帶一般瀏覽器 UA
@@ -543,7 +546,7 @@ def county_of(p):
     return CANON.get(m.group(1), m.group(1))
 
 
-def write_outputs(points, per_source, cfg, outdir, merged, started):
+def write_outputs(points, per_source, cfg, outdir, merged, started, fw_dropped=()):
     os.makedirs(outdir, exist_ok=True)
     points.sort(key=lambda p: (p["lat"], p["lon"]))
 
@@ -581,6 +584,7 @@ def write_outputs(points, per_source, cfg, outdir, merged, started):
         "sources": per_source,
         "by_county": OrderedDict(sorted(by_county.items(), key=lambda kv: -kv[1])),
         "missing_counties": missing,
+        "freeway_misplaced": list(fw_dropped),
     }
     with open(os.path.join(outdir, "report.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
@@ -619,6 +623,15 @@ def write_outputs(points, per_source, cfg, outdir, merged, started):
         for s in mal:
             L.append("- **%s**：%d 筆　例：`%s`" %
                      (s["name"], s["malformed_coords"], "`、`".join(s["malformed_samples"])))
+        L.append("")
+    if fw_dropped:
+        L += ["", "### ⚠️ 剔除：座標不在國道上的國道照相（%d 支）" % len(fw_dropped), "",
+              "名稱寫了國道 N 號，座標卻離國道 N 超過 %d 公尺，是原始資料的錯誤。" % freeway_check.MAX_OFF_M,
+              "留著的話 App 會在錯的地方唸「前方有測速照相」。", "",
+              "| 名稱 | 座標 | 離國道 |", "|---|---|---|"]
+        for d in fw_dropped:
+            L.append("| %s | %.5f, %.5f | %s |" % (d["name"], d["lat"], d["lon"],
+                     ("%d m" % d["off_m"]) if d["off_m"] is not None else "3 km 以上"))
         L.append("")
     if bad:
         L += ["", "### 失敗的來源", ""]
@@ -700,7 +713,12 @@ def main():
             print("   ✗ 失敗：%s" % (st["reason"] or "不明")[:160])
 
     kept, merged = dedupe(all_pts, cfg.get("dedupe_meters", 25))
-    rep = write_outputs(kept, per_source, cfg, a.out, merged, started)
+    # 國道照相的座標要真的在那條國道上（見 freeway_check.py）
+    kept, fw_dropped = freeway_check.check(kept, os.path.join(ROOT, "docs", "data", "roadgraph.min.json"))
+    for d in fw_dropped:
+        print("   ⚠ 剔除座標不在國道上的照相：%s（離國道 %s 公尺）"
+              % (d["name"], d["off_m"] if d["off_m"] is not None else "3000+"))
+    rep = write_outputs(kept, per_source, cfg, a.out, merged, started, fw_dropped)
 
     print("\n" + "=" * 58)
     print("合併後 %d 點（去重 %d）｜區間測速 %d｜有速限 %d"
