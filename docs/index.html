@@ -228,6 +228,9 @@ textarea{resize:vertical;min-height:74px}
 #icRow .tx{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;gap:12px}
 #icRow .dd{font-variant-numeric:tabular-nums;font-weight:700;color:#7fc2ff}
 #icRow .ex{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.shareItem{padding:8px 0;border-bottom:1px solid var(--line)}
+.shareUrl{font:12px/1.4 ui-monospace,monospace;color:var(--dim);word-break:break-all;margin:4px 0 6px;user-select:all}
+.shareBtns{display:flex;gap:8px}
 #icRow .ex b{color:#ffd84d}
 #icRow .ex i{font-style:normal;font-size:11px;margin-left:3px;padding:0 4px;border-radius:4px;background:#2a5c8f;color:#fff}
 #icRow .ex em{font-style:normal;font-weight:800;font-variant-numeric:tabular-nums;color:#7fc2ff}
@@ -687,6 +690,21 @@ textarea{resize:vertical;min-height:74px}
       <button class="btn wide gold" id="btnSim">開始模擬行車</button>
       <div class="hint" style="margin-top:8px">沿著資料庫中最密集的一段路自動行駛，會實際觸發語音與警示。</div>
     </div>
+    <div class="card" id="shareCard">
+      <h3>📤 分享鹿豹 <small>傳給朋友下載</small></h3>
+      <div class="shareItem">
+        <div><b>網頁版</b> <span class="hint">iPhone、Android 都能用，開了就能用</span></div>
+        <div class="shareUrl" id="shareWebUrl"></div>
+        <div class="shareBtns"><button class="btn sm" data-share="web">📤 分享</button><button class="btn sm" data-copy="web">📋 複製</button></div>
+      </div>
+      <div class="shareItem">
+        <div><b>Android App（APK）</b> <span class="hint">永遠是最新版</span></div>
+        <div class="shareUrl" id="shareApkUrl"></div>
+        <div class="shareBtns"><button class="btn sm" data-share="apk">📤 分享</button><button class="btn sm" data-copy="apk">📋 複製</button></div>
+        <div class="hint" style="margin-top:4px">對方點連結下載後按「安裝」；第一次會問要不要允許安裝不明來源的 App，允許一次即可。iPhone 請用網頁版。</div>
+      </div>
+      <button class="btn wide" data-share="both" style="margin-top:8px">📤 兩個連結一起分享</button>
+    </div>
     <div class="card">
       <h3>ℹ️ 關於</h3>
       <div class="hint" id="aboutBox" style="line-height:1.9">
@@ -806,7 +824,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261015.1921';
+const APP_BUILD='20261015.1940';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -4418,6 +4436,7 @@ function renderSources(){
 
 /* ---------- 19. 綁定 ---------- */
 function bind(){
+  bindShare();
   // tabs
   document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
     document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('active'));
@@ -4792,6 +4811,38 @@ async function autoData(){
    · 網頁版：抓網站上的 index.html 比建置序號，較新就提示；點一下清掉快取重新載入
      （不然 Service Worker 是快取優先，要完整關掉再開兩次才會換成新版）
    ═══════════════════════════════════════════════════════════ */
+/* ---------- 19a. 分享下載連結 ----------
+   APK 用 GitHub「latest」固定網址：每次發新版自動指到最新那一個，連結不用改。
+   App 內的 WebView 沒有系統分享（navigator.share），沒有就改成複製到剪貼簿。 */
+const SHARE={
+  web:'https://winnerich168.github.io/luleopard/',
+  apk:'https://github.com/winnerich168/luleopard/releases/latest/download/app-release.apk',
+};
+const shareText=k=> k==='web'? '鹿豹 · 台灣測速照相預報（網頁版）\n'+SHARE.web
+  : k==='apk'? '鹿豹 · 台灣測速照相預報（Android App）\n'+SHARE.apk
+  : '鹿豹 · 台灣測速照相預報\n網頁版（iPhone／Android）：'+SHARE.web+'\nAndroid App：'+SHARE.apk;
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); return true; }catch(e){}
+  try{
+    const ta=document.createElement('textarea'); ta.value=t; ta.style.cssText='position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select(); const ok=document.execCommand('copy'); ta.remove(); return ok;
+  }catch(e){ return false; }
+}
+async function shareLink(k,copyOnly){
+  const text=shareText(k);
+  if(!copyOnly&&navigator.share){
+    try{ await navigator.share({title:'鹿豹',text}); return; }
+    catch(e){ if(e&&e.name==='AbortError') return; }   // 使用者自己取消
+  }
+  toast(await copyText(text)? '已複製連結，貼到 LINE 或訊息給朋友就可以' : '無法複製，請長按上面的網址自己複製',4000);
+}
+function bindShare(){
+  const w=el('shareWebUrl'), a=el('shareApkUrl'); if(!w) return;
+  w.textContent=SHARE.web; a.textContent=SHARE.apk;
+  document.querySelectorAll('#shareCard [data-share]').forEach(b=>b.onclick=()=>shareLink(b.dataset.share));
+  document.querySelectorAll('#shareCard [data-copy]').forEach(b=>b.onclick=()=>shareLink(b.dataset.copy,true));
+}
+
 const RELEASES_API='https://api.github.com/repos/winnerich168/luleopard/releases/latest';
 const UPD={checking:false,avail:null,closed:false,lastAt:0};
 /** 'v1.9.10' > 'v1.9.2' 這種比較，不能用字串比 */
