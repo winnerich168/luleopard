@@ -528,19 +528,32 @@ function officialFromTdx(o, freeway) {
  * 實際部署後馬上就吃到 429，整個官方事件功能等於沒作用。
  */
 const TDX_TOKEN_KEY = 'tdx:token';
+const TDX_COOL_KEY = 'tdx:cool';
 async function tdxToken(env, force) {
   const now = Date.now();
   if (!force) {
     const c = await Store.meta(env, TDX_TOKEN_KEY);
     if (c && c.tk && c.exp - now > 3600e3) return c.tk;
   }
+  /* 被 429 擋下之後先停一陣子再試。實際發生過：每 10 分鐘的排程一直被擋、一直重試，
+     重試本身又讓限制解不開，官方事件連續好幾天抓不到。冷卻 30 分鐘起跳，連續被擋就加倍，最多 6 小時 */
+  const cool = await Store.meta(env, TDX_COOL_KEY);
+  if (cool && cool.until > now) { officialErr = '憑證服務 429 冷卻中，' + Math.ceil((cool.until - now) / 60e3) + ' 分鐘後再試'; return null; }
   const r = await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'client_credentials',
                                 client_id: env.TDX_ID, client_secret: env.TDX_SECRET }),
   });
-  if (!r.ok) { officialErr = 'token HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120); return null; }
+  if (!r.ok) {
+    officialErr = 'token HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120);
+    if (r.status === 429) {
+      const n = Math.min(((cool && cool.n) || 0) + 1, 5), ms = Math.min(30 * 60e3 * 2 ** (n - 1), 6 * 3600e3);
+      await Store.setMeta(env, TDX_COOL_KEY, { until: now + ms, n }, ms + 24 * 3600e3);
+    }
+    return null;
+  }
+  if (cool) await Store.delMeta(env, TDX_COOL_KEY);
   const j = await r.json();
   if (!j.access_token) { officialErr = 'token 沒有 access_token'; return null; }
   const exp = now + (j.expires_in || 86400) * 1000;

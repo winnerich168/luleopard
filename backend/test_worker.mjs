@@ -360,6 +360,18 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
   await call2('POST', '/reconcile'); await call2('POST', '/reconcile'); await call2('POST', '/reconcile');
   t('TDX 憑證快取：三次排程只申請一次', tokenCalls === 1, tokenCalls);
 
+  // 憑證服務回 429：之後的排程先冷卻，不要每 10 分鐘又去撞
+  await metaDel(env2, 'tdx:token'); tokenCalls = 0;
+  globalThis.fetch = async (u, o) => { if (String(u).includes('/token')) { tokenCalls++;
+    return new Response('{"message":"API rate limit exceeded"}', { status: 429 }); } return wrapped(u, o); };
+  const k1 = await call2('POST', '/reconcile'), k2 = await call2('POST', '/reconcile');
+  t('429 後冷卻：兩次排程只撞一次', tokenCalls === 1 && /429/.test(k1.body.reason) && /冷卻/.test(k2.body.reason), [tokenCalls, k1.body, k2.body]);
+  const cool = await metaGet(env2, 'tdx:cool');
+  await metaSet(env2, 'tdx:cool', { ...cool, until: Date.now() - 1 });
+  globalThis.fetch = async (u, o) => { if (String(u).includes('/token')) tokenCalls++; return wrapped(u, o); };
+  const k3 = await call2('POST', '/reconcile');
+  t('冷卻結束後恢復，冷卻紀錄清掉', !k3.body.skipped && !(await metaGet(env2, 'tdx:cool')), k3.body);
+
   globalThis.fetch = realFetch;
 }
 
