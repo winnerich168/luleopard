@@ -824,7 +824,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261016.1248';
+const APP_BUILD='20261016.1258';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -2133,6 +2133,19 @@ function initMap(){
     L.control.zoom({position:'bottomleft'}).addTo(MAP);
     camLayer=L.layerGroup().addTo(MAP);
     MAPROT.on = CFG.mapRotate!==false;
+    // 容器被 CSS 旋轉時，Leaflet 拖曳用的是螢幕上的手指位移，
+    // 地圖會往轉過的方向跑（車頭朝西時往上滑變成往右）。
+    // 在 predrag 把位移反向轉回容器自己的座標系。
+    const drg=MAP.dragging&&MAP.dragging._draggable;
+    if(drg) drg.on('predrag',()=>{
+      if(!MAPROT.deg||!drg._startPos||!drg._newPos) return;
+      const th=-MAPROT.deg*Math.PI/180;
+      // Leaflet 先把位移除以 _parentScale（外接矩形／元素尺寸），旋轉後這個比例是錯的，先乘回來
+      const sc=drg._parentScale||{x:1,y:1};
+      const dx=(drg._newPos.x-drg._startPos.x)*sc.x, dy=(drg._newPos.y-drg._startPos.y)*sc.y;
+      drg._newPos=drg._startPos.add(L.point(dx*Math.cos(th)-dy*Math.sin(th),
+                                            dx*Math.sin(th)+dy*Math.cos(th)));
+    });
     // 用原生 click 而不是 MAP.on('click')：容器被 CSS 旋轉後，
     // Leaflet 自己算出來的經緯度會偏掉（它用外接矩形）。
     MAP.getContainer().addEventListener('click',ev=>{
