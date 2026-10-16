@@ -467,7 +467,17 @@ const TDX_EVENT_URLS = [
   'https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Highway?%24format=JSON',
 ];
 const OFFICIAL_KEY = 'official';           // 整份官方事件清單存成 meta 表的一筆
-const OFFICIAL_STALE_MS = 30 * 60e3;       // 排程停擺超過 30 分鐘就不再提供，寧缺勿錯
+const OFFICIAL_STALE_MS = 2 * 3600e3;      // 超過兩次抓取間隔（夜間 90 分鐘＋緩衝）沒更新就不再提供，寧缺勿錯
+/* TDX 基礎會員每月 3 點（約 3,000 次呼叫），超過會「超量使用停權」。
+   實際發生過：每 10 分鐘抓國道＋省道兩個來源，一天 288 次，10/15 就用完當月額度被停權。
+   現在白天（6～24 時）每 30 分鐘、夜間每 90 分鐘抓一次：一天 (36+4)×2 = 80 次，31 天約 2,480 次 */
+const OFFICIAL_EVERY_DAY_MS = 30 * 60e3, OFFICIAL_EVERY_NIGHT_MS = 90 * 60e3;
+const OFFICIAL_LAST_KEY = 'official:last';
+function officialDue(now, last) {
+  const h = new Date(now + 8 * 3600e3).getUTCHours();
+  const every = h < 6 ? OFFICIAL_EVERY_NIGHT_MS : OFFICIAL_EVERY_DAY_MS;
+  return !last || now - last >= every - 60e3;      // 少 1 分鐘：排程時間有幾秒誤差，不要剛好錯過變成多等一輪
+}
 const OFFICIAL_DEDUPE_M = 300;             // 使用者回報已經在附近就不重複給官方那筆
 
 /** "POINT(121.01 24.85)" / "POINT (121.01 24.85)" → {lat, lon} */
@@ -681,7 +691,12 @@ export default {
   /** Cloudflare 排程觸發：對帳官方事件。在 wrangler.toml 設 crons。 */
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      await Store.sweep(env, Date.now());
+      const now = Date.now();
+      await Store.sweep(env, now);
+      const last = await Store.meta(env, OFFICIAL_LAST_KEY);
+      if (!officialDue(now, last && last.t)) return;
+      // 不管成功失敗都記下這次有去抓：失敗也算 TDX 的呼叫次數
+      await Store.setMeta(env, OFFICIAL_LAST_KEY, { t: now }, 24 * 3600e3);
       console.log('reconcile', JSON.stringify(await reconcile(env)));
     })());
   },

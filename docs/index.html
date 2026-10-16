@@ -824,7 +824,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261016.2200';
+const APP_BUILD='20261016.2223';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -2448,7 +2448,7 @@ async function ingestZip(buf,label){
 
 /* ---------- 15. 官方即時路況 ----------
    以前是手機自己拿 TDX 金鑰直接呼叫（金鑰存在每支手機裡、還常被 CORS 擋）。
-   現在由後端（backend/worker.js）每 10 分鐘代抓，隨 /hazards 一起回傳，
+   現在由後端（backend/worker.js）白天每 30 分鐘、夜間每 90 分鐘代抓（TDX 免費額度每月約 3,000 次），隨 /hazards 一起回傳，
    在 HAZARDS 裡標成 src:'official'。這裡只記錄最近一次的狀態給設定頁顯示。 */
 const OFFICIAL={pulled:0,listT:0,near:0,err:''};
 function paintOfficial(){
@@ -2457,10 +2457,10 @@ function paintOfficial(){
   else if(!OFFICIAL.pulled){ st.textContent= CFG.hazUrl? '開始導航後自動取得' : '未連線（沒有設定伺服器）'; }
   else{
     const ago=m=>m<1?'剛剛':Math.round(m)+' 分鐘前';
-    /* 官方清單是空的或超過 30 分鐘沒更新 = 後端抓不到官方資料（實際發生過：TDX 憑證服務 429，
+    /* 官方清單是空的或超過 2 小時沒更新（後端白天 30 分、夜間 90 分抓一次）= 後端抓不到官方資料（實際發生過：TDX 憑證服務 429，
        好幾天沒有施工／事故，畫面卻一直寫「已連線」）。這時要講清楚，只剩使用者回報 */
     const m=(Date.now()-OFFICIAL.listT)/60e3;
-    st.textContent= OFFICIAL.listT&&m<=30? '✅ 官方資料更新於 '+ago(m)
+    st.textContent= OFFICIAL.listT&&m<=120? '✅ 官方資料更新於 '+ago(m)
       : '⚠️ 官方施工／事故資料暫時抓不到'+(OFFICIAL.listT? '（'+Math.round(m)+' 分鐘前）':'')+'，目前只有使用者回報';
   }
   if(ct) ct.textContent= OFFICIAL.pulled? OFFICIAL.near+' 筆（15 公里內）' : '—';

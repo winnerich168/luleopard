@@ -348,9 +348,12 @@ console.log('\n── 官方即時事件（TDX RoadEvent/LiveEvent，實際回�
   fail503 = false;
 
   // 排程停擺太久 → 不再提供舊清單
-  await metaSet(env2, 'official', { ...after, t: Date.now() - 31 * 60e3 });
+  await metaSet(env2, 'official', { ...after, t: Date.now() - 100 * 60e3 });
+  const q6a = await call2('GET', `/hazards?lat=${acc.lat}&lon=${acc.lon}&r=3000`);
+  t('官方清單 100 分鐘前（夜間抓取間隔內）照常提供', q6a.body.officialT === Date.now() - 100 * 60e3 || q6a.body.officialT > 0, q6a.body);
+  await metaSet(env2, 'official', { ...after, t: Date.now() - 121 * 60e3 });
   const q6 = await call2('GET', `/hazards?lat=${acc.lat}&lon=${acc.lon}&r=3000`);
-  t('官方清單超過 30 分鐘沒更新就不提供', q6.body.official === 0, q6.body);
+  t('官方清單超過 2 小時沒更新就不提供', q6.body.official === 0, q6.body);
 
   // 憑證要快取：多次排程只申請一次（TDX 憑證服務有頻率限制，每次都申請會吃 429）
   let tokenCalls = 0;
@@ -401,6 +404,18 @@ console.log('\n── 免費額度（這次換 D1 的原因）──');
   const left = (await e2.DB.prepare('SELECT id FROM hazards').all()).results.map(r => r.id);
   t('排程清掉過期事件、保留有效的', left.length === 1 && left[0] === 'new1', left);
   t('排程清掉過期的冷卻紀錄', (await metaGet(e2, 'c:olddev')) === null);
+
+  // TDX 每月額度約 3,000 次：排程每 10 分鐘跑，但官方資料白天 30 分鐘、夜間 90 分鐘才抓一次
+  const e4 = { DB: makeD1(), TDX_ID: 'x', TDX_SECRET: 'y' };
+  let tdxCalls = 0; const rf = globalThis.fetch;
+  globalThis.fetch = async u => { if (/LiveEvent/.test(String(u))) tdxCalls++;
+    return /token/.test(String(u)) ? new Response(JSON.stringify({ access_token: 'tk' })) : new Response('[]'); };
+  const realNow = Date.now; let T = Date.UTC(2026, 9, 16, 2, 0);       // 台灣 10 點
+  Date.now = () => T;
+  const tick = async () => { const w = []; await worker.scheduled({}, e4, { waitUntil: p => w.push(p) }); await Promise.all(w); };
+  for (let i = 0; i < 144; i++) { await tick(); T += 10 * 60e3; }      // 跑滿一天
+  Date.now = realNow; globalThis.fetch = rf;
+  t('一整天的 TDX 呼叫在 80 次左右（31 天 < 3,000）', tdxCalls >= 70 && tdxCalls <= 84 && tdxCalls * 31 < 3000, tdxCalls);
 }
 
 console.log('\n── 使用統計心跳 /ping ──');
