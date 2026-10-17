@@ -1212,7 +1212,8 @@ const Audio_=(function(){
       try{ ctx=ctx||new (window.AudioContext||window.webkitAudioContext)(); if(ctx.state==='suspended')ctx.resume(); }catch(e){}
       try{ const u=new SpeechSynthesisUtterance(' '); u.volume=0; speechSynthesis.speak(u); }catch(e){}
       pickVoice(); unlocked=true;
-      el('dVoice').className='dot '+(('speechSynthesis' in window)?'on':'err');
+      // App 裡用原生 TTS：Android WebView 沒有 speechSynthesis，只看它的話 App 永遠是紅點
+      el('dVoice').className='dot '+((Native.hasTTS||('speechSynthesis' in window))?'on':'err');
     },
     beep(freq,dur,vol){
       if(!CFG.beep||!ctx) return;
@@ -1430,6 +1431,17 @@ function sweptDist(pos,cam,d){
   return Math.min(d,s.d);
 }
 
+/* 匝道出口常常接到一個路口，路口上可能是另一條路的照相或區間起點。
+   實地回報：安坑交流道下來直行中央路，一路唸「前方 150 公尺，區間測速」—— 那是橫向環河路的區間。
+   在匝道上時，一般道路的照相要跟我的航向差 35° 以內才報（平常是 62°）；
+   國道、快速道路的照相不套用：上匝道併入主線時本來就要報 */
+function rampDirOk(c,hd,v){
+  if(hd==null||isNaN(hd)||(v||0)<=1.5||!c.hd) return true;
+  const M=MYROAD;
+  if(!M.conf||M.ri<0||!ROADNET.roads||!ROADNET.roads[M.ri]||!ROADNET.roads[M.ri].link) return true;
+  if(/國道|快速|高架|快速道路|台6[1-8]|臺6[1-8]/.test(c.name||'')) return true;
+  return c.hd.some(h=>angDiff(h,hd)<=35);
+}
 function evaluate(pos){
   const {lat,lon,heading,speed}=pos;
   const v=speed||0;                      // m/s
@@ -1457,6 +1469,7 @@ function evaluate(pos){
     const d=sweptDist(pos,c,d0);          // 這一步「掃過」的最近距離
     if(d>far){ state.delete(c.id); camMin.delete(c.id); continue; }
     if(!dirMatch(c,hd)){ state.delete(c.id); continue; }
+    if(!rampDirOk(c,hd,v)){ state.delete(c.id); continue; }
     const nearest=Math.min(camMin.has(c.id)?camMin.get(c.id):Infinity, d);
     camMin.set(c.id,nearest);
     // 真的通過 = 曾經開到它旁邊，而且現在已經離開一段距離
@@ -3409,7 +3422,7 @@ function paintHazRow(a){
 
 function paintSecRow(){
   const row=el('secRow');
-  if(!SECTION){ row.className=''; return; }
+  if(!SECTION||SECTION.pending){ row.className=''; return; }   // 還沒確定上了那條路，先不顯示
   const s=SECTION, lim=s.limit||0, avg=Math.round(s.avg||0), over=lim>0&&avg>lim+1;
   row.className='show'+(over?' over':'');
   /* 實地回報：最右邊只有一個數字，看不懂是什麼。每個數字都要寫清楚是什麼 */
@@ -4020,7 +4033,9 @@ function sameRoadAsMe(c){
   if(r.link) return true;                    // 在匝道上：前面要併入的主線照相照報
   const t=camRoadTag(c);
   if(!t||t[3]==='unsure'||t[5]==null) return true;
-  const nm=c.name||'';
+  /* 括號裡寫的是區間起訖或方向（「環河路（中央路至白馬寺，雙向）」），不是照相所在的路。
+     實地回報：從安坑交流道下來直行中央路，被當成在環河路上，報了「進入區間測速」 */
+  const nm=(c.name||'').replace(/[（(][^）)]*(至|往|方向|雙向)[^）)]*[）)]/g,'');
   // 照相名稱直接寫了我這條路的路名（路口照相常寫「A路與B路口」）
   if(r.names.some(n=>n.length>=2&&nm.includes(n))) return true;
   if(t[6]&&r.names.includes(t[6])) return true;
@@ -4095,6 +4110,7 @@ function parseSectionKm(s){
 
 /** 目前正在進行中的區間測速 */
 let SECTION=null;
+const secSkip=new Map();   // 起點開過但沒轉進去、安靜丟掉的區間：id → 時間，10 分鐘內不再起算
 const secApproach=new Map();   // 接近中的區間起點：camId -> 目前最近距離
 /* SECTION = {cam, lengthM, limit, startT, distM, lastLat, lastLon, warned, name} */
 
@@ -4108,10 +4124,20 @@ function sectionEnter(cam,pos){
            range: info&&info.fromKm!=null? (info.fromKm+'K → '+info.toKm+'K') : '',
            startT:Date.now()-back, distM: back? past : 0, lastLat:pos.lat, lastLon:pos.lon,
            lastT:pos.t||Date.now(), offSince:0, warned:false, over:false};
-  const km=SECTION.lengthM? (SECTION.lengthM/1000).toFixed(1)+'公里' : '';
-  Audio_.say('進入區間測速'+(km?('，全長'+km):'')+(cam.lim?('，速限'+cam.lim):''));
-  Audio_.beep(700,.18); Audio_.vibe([90,60,90]);
+  /* 還在匝道上就開過起點：匝道出口常常同時接好幾條路，
+     起點又剛好在路口，這時還不知道會不會轉進區間那條路。先記著不唸，
+     確定上了照相那條路（或開了 200 公尺／15 秒都沒有反證）才唸；確定是別條路就安靜丟掉 */
+  const M=MYROAD, r=M.conf&&M.ri>=0&&ROADNET.roads? ROADNET.roads[M.ri] : null;
+  SECTION.pending= !!(r&&r.link);    // 沒有路網資訊時照舊直接唸，只有確定在匝道上才等
+  SECTION.enterT=Date.now(); SECTION.enterD=SECTION.distM; SECTION.dirOk=0;
+  if(!SECTION.pending) sectionAnnounce();
   renderTrip();
+}
+function sectionAnnounce(){
+  const s=SECTION; s.pending=false;
+  const km=s.lengthM? (s.lengthM/1000).toFixed(1)+'公里' : '';
+  Audio_.say('進入區間測速'+(km?('，全長'+km):'')+(s.limit?('，速限'+s.limit):''));
+  Audio_.beep(700,.18); Audio_.vibe([90,60,90]);
 }
 
 function sectionUpdate(pos){
@@ -4120,9 +4146,12 @@ function sectionUpdate(pos){
      GPS 弱的時候還分不出在哪條路就進了區間；之後確定自己在別條路，這個區間就要取消。
      連續 8 秒確定不在照相那條路上才取消，匝道、交會處短暫判斷錯不會誤取消。 */
   const now=Date.now();
-  if(!sameRoadAsMe(SECTION.cam)){
+  const same=sameRoadAsMe(SECTION.cam);
+  if(!same){
     if(!SECTION.offSince) SECTION.offSince=now;
-    else if(now-SECTION.offSince>8000) return sectionCancel();
+    // 還沒唸出來的：確定 3 秒是別條路就安靜丟掉，不用唸「已取消」
+    if(SECTION.pending&&now-SECTION.offSince>3000){ secSkip.set(SECTION.cam.id,now); SECTION=null; renderTrip(); return null; }
+    if(now-SECTION.offSince>8000) return sectionCancel();
   } else SECTION.offSince=0;
   /* 距離只累加合理的位移：定位差時會一下跳好幾百公尺再跳回來，全部加進去平均就破千。
      誤差超過 100 公尺的定位不採用；每一步最多算時速 250 公里能走的距離 */
@@ -4130,6 +4159,17 @@ function sectionUpdate(pos){
     const t=pos.t||now, dt=Math.max(0.5,(t-SECTION.lastT)/1000);
     const d=dist(SECTION.lastLat,SECTION.lastLon,pos.lat,pos.lon);
     if(d>0){ SECTION.distM+=Math.min(d,dt*70); SECTION.lastLat=pos.lat; SECTION.lastLon=pos.lon; SECTION.lastT=t; }
+  }
+  if(SECTION.pending&&same){
+    /* 確定的方法：路網確定我已經離開匝道、在照相那條路上；或航向連續 2 筆跟區間方向差 35° 以內
+       而且已經開了 30 公尺。開了 150 公尺或 20 秒還確定不了 → 多半是直行過路口、沒轉進去，安靜丟掉 */
+    const M=MYROAD, r=M.conf&&M.ri>=0&&ROADNET.roads? ROADNET.roads[M.ri] : null;
+    const hs=SECTION.cam.hd, hd=pos.headingOk===false? null : pos.heading, gone=SECTION.distM-SECTION.enterD;
+    if(hd!=null&&!isNaN(hd)&&(pos.speed||0)>1.5)
+      SECTION.dirOk= !hs||hs.some(h=>angDiff(h,hd)<=35)? SECTION.dirOk+1 : 0;
+    if(r&&!r.link) sectionAnnounce();
+    else if(SECTION.dirOk>=2&&gone>30) sectionAnnounce();
+    else if(gone>150||now-SECTION.enterT>20000){ secSkip.set(SECTION.cam.id,now); SECTION=null; renderTrip(); return null; }
   }
   const el_=Math.max(1,(Date.now()-SECTION.startT)/1000);          // 秒
   SECTION.avg=SECTION.distM/el_*3.6;                                // km/h
@@ -4243,6 +4283,7 @@ function updateTrip(pos){
        現在接近時記下最近距離，距離開始拉開 = 剛開過起點，才進入區間。 */
     for(const c of CAMS){
       if(!c.sec) continue;
+      if(secSkip.has(c.id)&&now-secSkip.get(c.id)<10*60e3) continue;
       if(Math.abs(c.lat-pos.lat)>0.003||Math.abs(c.lon-pos.lon)>0.004){ secApproach.delete(c.id); continue; }
       if(!dirMatch(c,pos.heading)) continue;
       // GPS 弱（誤差 50 公尺以上）分不出是橋上還是橋下，寧可不起算
@@ -4943,7 +4984,7 @@ function boot(){
   // 開啟網頁當下就先試一次。部分瀏覽器不需要使用者手勢就會給；
   // 需要手勢的那些會失敗，但按下起始按鈕時會再試一次，所以不影響。
   wakeAcquire();
-  el('dVoice').className='dot '+(('speechSynthesis' in window)?'':'err');
+  el('dVoice').className='dot '+((Native.hasTTS||('speechSynthesis' in window))?'':'err');
   if(!Store.persistent) toast('此環境無法保存資料，設定與回報僅在本次開啟期間有效',5000);
   // PWA manifest（動態注入，維持單檔）。
   // 部署到 GitHub Pages 時 build-pages.mjs 會放一份真的 manifest.webmanifest
