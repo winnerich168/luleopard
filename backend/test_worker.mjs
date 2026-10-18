@@ -444,6 +444,50 @@ console.log('\n── 使用統計心跳 /ping ──');
   t('排程清掉一天沒心跳的裝置', (await e3.DB.prepare('SELECT COUNT(*) AS n FROM online').first()).n === 0);
 }
 
+console.log('\n── 車隊（跟車） ──');
+{
+  const C = '/convoy/K7P2QX';
+  const pos = (device, label, extra = {}) => call('POST', C, { device, label, lat: A.lat, lon: A.lon, hd: 180, spd: 25, ...extra });
+  t('代碼格式不對回 404', (await call('POST', '/convoy/abc', { device: 'dcar0001', label: 'A' })).status === 404);
+  t('車號只能 A～H', (await pos('dcar0001', 'Z')).status === 400);
+  t('缺裝置代號回 400', (await pos('', 'A')).status === 400);
+  const now = Date.now();
+  // 頭車軌跡：90 秒、每 3 秒一點、每點往南 20 公尺 → 只留最近約 1 分鐘、1 公里內
+  const trail = Array.from({ length: 31 }, (_, i) => [A.lat + (30 - i) * 20 / 111320, A.lon, now - (30 - i) * 3000]);
+  const a = await pos('dcar0001', 'A', { trail });
+  t('頭車加入成功', a.status === 200 && a.body.members.length === 1 && a.body.members[0].me, a.body);
+  const tr = a.body.members[0].trail || [];
+  const span = tr.length ? (tr[tr.length - 1][2] - tr[0][2]) / 1000 : 0;
+  t('頭車軌跡只留約 1 分鐘', tr.length >= 15 && span <= 70, { n: tr.length, span });
+  const b = await call('POST', C, { device: 'dcar0002', label: 'B' });
+  t('還沒定位也能先佔車號', b.status === 200 && b.body.members.length === 2, b.body);
+  const bm = b.body.members.find(m => m.label === 'B');
+  t('沒定位的車座標是 null', bm && bm.lat === null && bm.me, bm);
+  const am = b.body.members.find(m => m.label === 'A');
+  t('別人看得到頭車與軌跡', am && !am.me && am.lat === A.lat && am.trail && am.trail.length === tr.length, am);
+  const dup = await pos('dcar0003', 'A');
+  t('車號重複回 409 並列出已用車號', dup.status === 409 && dup.body.taken.join('') === 'AB', dup.body);
+  const bt = await pos('dcar0002', 'B', { trail });
+  t('非頭車不存軌跡', bt.status === 200 && !bt.body.members.find(m => m.label === 'B').trail);
+  const raw = (await env.DB.prepare('SELECT dev FROM convoy').all()).results;
+  t('不存原始裝置代號', raw.length === 2 && !raw.some(r => /dcar/.test(r.dev)), raw);
+  const g = await call('GET', C);
+  t('GET 看得到成員、沒有 me', g.status === 200 && g.body.members.length === 2 && g.body.members.every(m => m.me === false), g.body);
+  t('別的車隊看不到', (await call('GET', '/convoy/ZZZZZZ')).body.members.length === 0);
+  // 頭車離開後，A 可以給別人
+  t('離開', (await call('POST', C + '/leave', { device: 'dcar0001' })).status === 200);
+  t('離開後車號釋出', (await pos('dcar0003', 'A')).status === 200);
+  // 很久沒更新：不再佔車號；排程清掉一小時以上的
+  await env.DB.prepare('UPDATE convoy SET t = ?1 WHERE label = ?2').bind(Date.now() - 5 * 60e3, 'B').run();
+  t('5 分鐘沒更新就不佔車號', (await pos('dcar0004', 'B')).status === 200);
+  await env.DB.prepare('UPDATE convoy SET t = ?1').bind(Date.now() - 2 * 3600e3).run();
+  const w = []; await worker.scheduled({}, env, { waitUntil: p => w.push(p) }); await Promise.all(w);
+  t('排程清掉一小時沒更新的', (await env.DB.prepare('SELECT COUNT(*) AS n FROM convoy').first()).n === 0);
+  // 最多 8 台
+  for (const L of 'ABCDEFGH') await pos('dfull' + L + '000', L, {});
+  t('滿 8 台再加入回 409', (await call('POST', '/convoy/K7P2QX', { device: 'dfullZ000', label: 'A' })).status === 409);
+}
+
 console.log('\n── 沒綁資料庫時要講清楚 ──');
 {
   const res = await worker.fetch(new Request(BASE + '/hazards?lat=25&lon=121'), {});

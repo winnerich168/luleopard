@@ -12,6 +12,9 @@
  *   POST /hazards/:id/probe             被動車流探針（App 自動送，使用者不用操作）
  *   GET  /stats                         簡單統計
  *   POST /ping                          使用統計心跳 { device }（只進後台，見 scripts/stats.sh）
+ *   POST /convoy/:code                  車隊：更新自己的位置、拿全隊位置（見 handleConvoy）
+ *   GET  /convoy/:code                  車隊：看誰在裡面
+ *   POST /convoy/:code/leave            車隊：離開
  *
  * 自動下架機制（不需要有人顧後台）：
  *   1. 置信度隨時間依類型半衰期衰減
@@ -203,6 +206,7 @@ const Store = {
     await env.DB.prepare('DELETE FROM meta WHERE exp IS NOT NULL AND exp < ?1').bind(now).run();
     await env.DB.prepare('DELETE FROM online WHERE last < ?1').bind(now - 86400e3).run();
     await env.DB.prepare('DELETE FROM daily_dev WHERE day < ?1').bind(twDay(now - 90 * 86400e3)).run();
+    await env.DB.prepare('DELETE FROM convoy WHERE t < ?1').bind(now - 3600e3).run();
   },
 };
 
@@ -228,6 +232,99 @@ async function handlePing(env, req) {
     'ON CONFLICT(day) DO UPDATE SET peak = excluded.peak, peak_at = excluded.peak_at WHERE excluded.peak > daily.peak')
     .bind(day, n, now).run();
   return json({ ok: true });
+}
+
+/**
+ * 車隊（跟車）。同一個代碼的車互相看得到位置，沒有帳號、不用建立房間：
+ * 第一台車送出位置時車隊就存在了，最後一台離開（或 1 小時沒更新）就沒了。
+ *   POST /convoy/:code        { device, label, lat?, lon?, hd?, spd?, acc?, trail? } → 回傳全隊位置
+ *   GET  /convoy/:code        只看誰在裡面（加入前挑車號用）
+ *   POST /convoy/:code/leave  { device }
+ * 車號 A～H，A 是頭車：只有頭車的軌跡（最近約 1 分鐘、最長 1 公里）會存下來給大家畫。
+ */
+const CONVOY_LABELS = 'ABCDEFGH';
+const CONVOY_ACTIVE_MS = 3 * 60e3;       // 這段時間內有更新才算佔用車號
+const CONVOY_SHOW_MS = 10 * 60e3;        // 超過就不回傳（App 已經關掉或沒訊號太久）
+const CONVOY_TRAIL_MAX = 40;
+const CONVOY_TRAIL_MS = 70e3;
+const CONVOY_TRAIL_M = 1100;
+
+async function convoyMembers(env, code, now) {
+  const r = await env.DB.prepare('SELECT dev, label, t, data FROM convoy WHERE code = ?1 AND t > ?2 LIMIT 20')
+    .bind(code, now - CONVOY_SHOW_MS).all();
+  return (r.results || []).map(x => ({ dev: x.dev, label: x.label, t: x.t, ...JSON.parse(x.data) }));
+}
+const convoyShape = (m, me, now) => ({
+  label: m.label, me: m.dev === me, t: m.t, age: Math.round((now - m.t) / 1000),
+  lat: m.lat == null ? null : m.lat, lon: m.lon == null ? null : m.lon,
+  hd: m.hd == null ? null : m.hd, spd: m.spd == null ? null : m.spd,
+  ...(m.label === 'A' && m.trail ? { trail: m.trail } : {}),
+});
+const num = (v, lo, hi) => { const n = parseFloat(v); return isFinite(n) && n >= lo && n <= hi ? n : null; };
+
+/** 頭車軌跡：只收合法座標，從最新往回最多 70 秒、1.1 公里、40 點 */
+function cleanTrail(a, now) {
+  if (!Array.isArray(a)) return null;
+  const pts = [];
+  for (const p of a.slice(-CONVOY_TRAIL_MAX)) {
+    if (!Array.isArray(p)) continue;
+    const la = num(p[0], -90, 90), lo = num(p[1], -180, 180), t = num(p[2], now - 3600e3, now + 60e3);
+    if (la != null && lo != null && t != null) pts.push([Math.round(la * 1e6) / 1e6, Math.round(lo * 1e6) / 1e6, Math.round(t)]);
+  }
+  const out = [];
+  let len = 0;
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    if (out.length) {
+      const q = out[out.length - 1];
+      len += distM(p[0], p[1], q[0], q[1]);
+      if (len > CONVOY_TRAIL_M || out[0][2] - p[2] > CONVOY_TRAIL_MS) break;
+    }
+    out.push(p);
+  }
+  return out.reverse();
+}
+
+async function handleConvoy(env, req, code, action) {
+  const now = Date.now();
+  if (req.method === 'GET') {
+    const ms = await convoyMembers(env, code, now);
+    return json({ ok: true, now, code, members: ms.map(m => convoyShape(m, null, now)) });
+  }
+  let b;
+  try { b = await req.json(); } catch { return json({ error: 'JSON 格式錯誤' }, 400); }
+  const device = clean(b && b.device, 64);
+  if (!device || device.length < 4) return json({ error: '缺少裝置代號' }, 400);
+  const dev = shortHash('convoy:' + device);
+
+  if (action === 'leave') {
+    await env.DB.prepare('DELETE FROM convoy WHERE code = ?1 AND dev = ?2').bind(code, dev).run();
+    return json({ ok: true });
+  }
+
+  const label = String(b.label || '').toUpperCase();
+  if (label.length !== 1 || !CONVOY_LABELS.includes(label)) return json({ error: '車號要是 A～H' }, 400);
+  const ms = await convoyMembers(env, code, now);
+  const taker = ms.find(m => m.label === label && m.dev !== dev && now - m.t < CONVOY_ACTIVE_MS);
+  if (taker) {
+    const taken = [...new Set(ms.filter(m => m.dev !== dev && now - m.t < CONVOY_ACTIVE_MS).map(m => m.label))].sort();
+    return json({ error: '車號 ' + label + ' 已經有人用了', taken }, 409);
+  }
+  if (!ms.some(m => m.dev === dev) && ms.filter(m => now - m.t < CONVOY_ACTIVE_MS).length >= CONVOY_LABELS.length)
+    return json({ error: '車隊已滿（最多 8 台）' }, 409);
+
+  const lat = num(b.lat, -90, 90), lon = num(b.lon, -180, 180);
+  const d = (lat != null && lon != null)
+    ? { lat, lon, hd: num(b.hd, 0, 360), spd: num(b.spd, 0, 120), acc: num(b.acc, 0, 100000) }
+    : { lat: null, lon: null };                  // 還沒定位：先佔車號，位置之後補
+  if (label === 'A') { const tr = cleanTrail(b.trail, now); if (tr && tr.length) d.trail = tr; }
+  await env.DB.prepare('INSERT OR REPLACE INTO convoy (code, dev, label, t, data) VALUES (?1, ?2, ?3, ?4, ?5)')
+    .bind(code, dev, label, now, JSON.stringify(d)).run();
+
+  const mine = { dev, label, t: now, ...d };
+  const list = ms.filter(m => m.dev !== dev).concat(mine)
+    .sort((x, y) => x.label.localeCompare(y.label) || y.t - x.t);
+  return json({ ok: true, now, code, members: list.map(m => convoyShape(m, dev, now)) });
 }
 
 async function handleQuery(env, url) {
@@ -713,6 +810,9 @@ export default {
       if (req.method === 'POST' && p === '/report') return handleReport(env, req);
       if (req.method === 'POST' && p === '/ping') return handlePing(env, req);
 
+      const mc = p.match(/^\/convoy\/([A-Z0-9]{6})(?:\/(leave))?$/);
+      if (mc && (req.method === 'POST' || (req.method === 'GET' && !mc[2]))) return handleConvoy(env, req, mc[1], mc[2]);
+
       const m = p.match(/^\/hazards\/([A-Za-z0-9-]{4,40})\/(confirm|clear)$/);
       if (req.method === 'POST' && m) return handleVote(env, req, m[1], m[2]);
 
@@ -733,7 +833,7 @@ export default {
       }
       return json({ error: 'not found', paths: ['/hazards', '/report',
         '/hazards/:id/confirm', '/hazards/:id/clear',
-        '/hazards/:id/retract', '/hazards/:id/probe', '/ping', '/stats'] }, 404);
+        '/hazards/:id/retract', '/hazards/:id/probe', '/ping', '/stats', '/convoy/:code'] }, 404);
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }

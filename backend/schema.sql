@@ -46,3 +46,15 @@ CREATE TABLE IF NOT EXISTS daily (
   peak    INTEGER NOT NULL,
   peak_at INTEGER NOT NULL
 );
+
+-- 車隊（跟車）：同一個車隊代碼的車互相看得到位置
+--   每台車一列，App 每 5 秒更新一次；頭車（A）在 data 裡多帶最近約 1 分鐘／1 公里的軌跡
+--   超過 1 小時沒更新的由排程清掉；App 端 8 小時自動解除
+CREATE TABLE IF NOT EXISTS convoy (
+  code  TEXT NOT NULL,       -- 車隊代碼（6 碼英數）
+  dev   TEXT NOT NULL,       -- 裝置代號的雜湊
+  label TEXT NOT NULL,       -- 車號 A～H，A 是頭車
+  t     INTEGER NOT NULL,    -- 最後更新（毫秒）
+  data  TEXT NOT NULL,       -- {lat,lon,hd,spd,acc,trail}
+  PRIMARY KEY (code, dev)
+);
