@@ -1,0 +1,13 @@
+{
+  "name": "luleopard-audio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "鹿豹 · 播報警示時讓其他 App（電台）暫停或降低音量，唸完再還回去",
+  "main": "index.js",
+  "files": ["index.js", "ios/", "android/", "LuleopardAudio.podspec"],
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": { "@capacitor/core": "^6.0.0" }
+}

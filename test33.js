@@ -100,10 +100,7 @@ const hav = (a, b, c, d) => Math.hypot((c - a) * 111320, (d - b) * 111320 * Math
   await B.click('#cvBtn'); await B.waitForTimeout(100);
   const list = await B.textContent('#cvList');
   ok(/頭車/.test(list) && /km/.test(list), '車隊清單沒列出頭車距離：' + list);
-  await B.screenshot({ path: path.join(__dirname, 'shot-convoy-sheet.png') });
   await B.click('#cvX');
-  await A.screenshot({ path: path.join(__dirname, 'shot-convoy-lead.png') });
-  await B.screenshot({ path: path.join(__dirname, 'shot-convoy.png') });
 
   // ── 8 小時到期：倒數 10 秒 ──
   const e1 = await B.evaluate(() => { window.__t = LP.CONVOY.until - 9500; window.__said = []; LP.convoyTick();
