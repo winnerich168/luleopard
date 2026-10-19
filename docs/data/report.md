@@ -1,6 +1,6 @@
 # 鹿豹 · 測速點位合併報告
 
-產生時間：2026-10-15T19:13:24+08:00（耗時 2256.0s）
+產生時間：2026-10-19T08:19:32+08:00（耗時 2067.9s）
 
 ## 總覽
 
@@ -21,7 +21,7 @@
 | 測速執法設置點（警政署） | 省道/縣道 | 1897 | utf-8-sig | https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/EA5E6FCD |
 | 臺北市固定測速照相地點表 | 六都 | 143 | cp950 | https://data.taipei/api/dataset/745b8808-061f-4f5b-9a62-da1590c049a9/r |
 | 新北市固定式測速照相地點 | 六都 | 173 | utf-8-sig | https://data.ntpc.gov.tw/api/datasets/99f3ff6e-0352-4399-a726-775ab765 |
-| 桃園市測速照相設備地點 | 六都 | — | — | **失敗** |
+| 桃園市測速照相設備地點 | 六都 | — | cp950 | **失敗** |
 | 臺中市科技執法取締地點 | 六都 | 77 | utf-8-sig | https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download |
 | 臺南市智慧管理科技執法設備設置地點 | 六都 | — | utf-8-sig | **失敗** |
 | 臺南市科技執法設備（座標為 geocoding 推算） | 六都 | 5 | utf-8-sig | 檔案 tainan_geocoded.csv |
@@ -53,7 +53,7 @@
 
 - **國道公路固定式測速照相地點**：https://www.tgos.tw/tgos/VirtualDir/Product/c2dd3a68-cafc-48fc-8a4a-7215ddc24cd3/1150720-國 → HTTPError: HTTP Error 403: Forbidden
 
-- **桃園市測速照相設備地點**：https://opendata.tycg.gov.tw/api/dataset/ecd45ee5-4489-436b-bd08-7d4e4111c4a4/resource/36e → TimeoutError: The read operation timed out
+- **桃園市測速照相設備地點**：https://opendata.tycg.gov.tw/api/dataset/ecd45ee5-4489-436b-bd08-7d4e4111c4a4/resource/36e → ValueError: 找不到經緯度欄位（欄位為：success, code, s_message）
 
 - **臺南市智慧管理科技執法設備設置地點**：https://soa.tainan.gov.tw/Api/Service/Get/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → URLError: <urlopen error [Errno 110] Connection timed out> | https://data.tainan.gov.tw/File/ResourceCsvDownload/1c7e82f0-d6b2-4b20-aeff-5c768100f82c → ValueError: 找不到經緯度欄位（欄位為：Seq, 編號, 轄區分局, 行政區, 設置位置, 拍攝
 行向, 速限）
