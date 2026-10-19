@@ -214,12 +214,27 @@ textarea{resize:vertical;min-height:74px}
 #fabMenuBar i.run{animation:fabCountdown var(--fabms,6000ms) linear forwards}
 @keyframes fabCountdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}
 /* ---------- 車隊（跟車） ---------- */
-#cvBtn{position:absolute;left:12px;top:12px;z-index:900;display:flex;align-items:center;gap:6px;
+#cvBtn,#rdBtn{position:absolute;left:12px;top:12px;z-index:900;display:flex;align-items:center;gap:6px;
   padding:9px 14px;border-radius:22px;background:#1d2836;border:2px solid rgba(255,255,255,.22);
   box-shadow:0 6px 20px rgba(0,0,0,.55);font-size:14px;font-weight:700}
 #cvBtn.on{background:#2a2410;border-color:var(--accent);color:#ffe6a8}
 #cvBtn.err{border-color:var(--warn)}
-#cvBtn:active{transform:scale(.95)}
+#cvBtn:active,#rdBtn:active{transform:scale(.95)}
+#rdBtn{top:62px}
+/* ---------- 電台 ---------- */
+.rdtabs{display:flex;gap:6px;background:var(--panel2);border-radius:12px;padding:4px;margin-bottom:10px}
+.rdtabs button{flex:1;min-height:42px;border-radius:9px;font-size:15px;font-weight:700;color:var(--dim)}
+.rdtabs button.on{background:var(--accent);color:#1a1400}
+.rdlist{display:flex;flex-direction:column;gap:6px}
+.rditem{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+  padding:11px 12px;color:var(--txt);text-decoration:none;min-height:54px}
+.rditem:active{transform:scale(.98)}
+.rditem div{flex:1;min-width:0}
+.rditem b{display:block;font-size:15px}
+.rditem span{display:block;font-size:12px;color:var(--dim);margin-top:2px}
+.rditem em{font-style:normal;font-size:11px;font-weight:800;background:var(--ok);color:#06210f;border-radius:6px;padding:2px 6px}
+.rditem i{font-style:normal;color:var(--dim);font-size:18px}
+.rdsub{font-size:12px;color:var(--dim);margin:10px 2px 4px}
 .cvsheet,.cvprompt{position:fixed;inset:0;z-index:1800;background:rgba(4,7,11,.72);display:flex;
   align-items:flex-end;justify-content:center;padding:0 12px calc(12px + var(--safe-b))}
 .cvprompt{z-index:2100;align-items:center}
@@ -414,6 +429,8 @@ textarea{resize:vertical;min-height:74px}
     <div id="fabMenu" class="hidden"></div>
     <!-- 車隊：一起出門的車互相看得到位置 -->
     <button id="cvBtn" title="車隊跟車">🚗 <span id="cvBtnTx">車隊</span></button>
+    <!-- 電台：連到各電台官方收聽頁 -->
+    <button id="rdBtn" title="電台">📻 <span>電台</span></button>
     <!-- 經過剛提醒過的事件後：一鍵回報還在／已經沒有了（15 秒自動消失） -->
     <div id="passCard"><div class="hd"><b id="passTx"></b><span id="passSub"></span><i id="passX">×</i></div>
       <div class="bt"><button id="passStill">還在</button><button id="passGone">已經沒有了</button></div></div>
@@ -816,6 +833,13 @@ textarea{resize:vertical;min-height:74px}
     <button id="cvLeave" class="btn danger cvgo">離開車隊</button>
   </div>
 </div></div>
+<!-- ══════════ 電台 ══════════ -->
+<div id="rdSheet" class="cvsheet hidden"><div class="cvbox">
+  <div class="cvhd"><b>📻 電台</b><i id="rdX">×</i></div>
+  <div id="rdTabs" class="rdtabs"><button data-t="pbs">警廣</button><button data-t="bcc">中廣</button><button data-t="more">其他</button></div>
+  <div id="rdList" class="rdlist"></div>
+  <div class="cvnote">點了會開啟電台的官方收聽頁面（中廣要用官方 App 收聽）。請在停車時選好再出發，行進中請勿操作手機。</div>
+</div></div>
 <div id="cvPrompt" class="cvprompt hidden"><div class="cvbox">
   <div class="cvbig" id="cvPromptN">10</div>
   <b>車隊已滿 8 小時</b>
@@ -907,7 +931,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261018.2021';
+const APP_BUILD='20261019.1125';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -3651,6 +3675,66 @@ function convoyBoot(){
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden) convoyTick(); });
 }
 
+/* ---------- 17e3. 電台 ----------
+   連到各電台官方的線上收聽頁，不在 App 裡轉播（轉播要電台授權）。
+   警廣放最前面：整天報路況，分台依目前位置排序，最近的標「最近」。
+   中廣沒有網頁播放器，只能用官方「中廣線上聽」App。 */
+const RADIO_PBS=[
+  {n:'臺北分臺',c:'TPS',la:25.04,lo:121.53},{n:'新竹分臺',c:'SCS',la:24.80,lo:120.97},
+  {n:'臺中分臺',c:'TCS',la:24.15,lo:120.67},{n:'臺南分臺',c:'TNS',la:22.99,lo:120.21},
+  {n:'高雄分臺',c:'KSS',la:22.63,lo:120.30},{n:'宜蘭分臺',c:'ELS',la:24.75,lo:121.75},
+  {n:'花蓮分臺',c:'HLS',la:23.98,lo:121.60},{n:'臺東分臺',c:'TTS',la:22.76,lo:121.14}];
+const RADIO_BCC=['中廣新聞網','中廣流行網 i like radio','中廣音樂網 i radio','中廣鄉親網','i Go 531'];
+const RADIO_BCC_APP={ios:'https://apps.apple.com/tw/app/id1182874270',
+  android:'https://play.google.com/store/apps/details?id=tw.com.wonderwall.bcc_player'};
+const RADIO_MORE=[
+  {n:'國立教育廣播電臺',d:'教育、文化；另有彰化、高雄、花蓮、臺中、臺東台',u:'https://www.ner.gov.tw/Channel/Taipei/'},
+  {n:'中央廣播電臺 華語',d:'新聞、國際',u:'https://www.rti.org.tw/program?uid=4&pid=88'},
+  {n:'臺北廣播電臺',d:'臺北市政府',u:'https://tradio.gov.taipei/'},
+  {n:'Hit FM 聯播網',d:'流行音樂',u:'http://www.hitoradio.com/onair.php'},
+  {n:'KISS RADIO 大眾廣播 FM99.9',d:'流行音樂，南部',u:'https://www.kiss.com.tw/radio_hq.php?radio_id=156'}];
+const pbsUrl=c=>'https://www.pbs.gov.tw/live/index.html?name='+c;
+let RADIO_TAB=Store.get(K('radioTab'),'pbs');
+/** 警廣分台：有定位就由近到遠，最近的標記出來 */
+function radioPbsOrder(p){
+  if(!p) return RADIO_PBS.map(x=>({...x,near:false}));
+  const a=RADIO_PBS.map(x=>({...x,d:dist(p.lat,p.lon,x.la,x.lo)})).sort((x,y)=>x.d-y.d);
+  return a.map((x,i)=>({...x,near:i===0}));
+}
+function radioItem(u,title,sub,badge){
+  return `<a class="rditem" href="${esc(u)}" target="_blank" rel="noopener"><div><b>${esc(title)}</b>`+
+    (sub?`<span>${esc(sub)}</span>`:'')+`</div>${badge?'<em>'+esc(badge)+'</em>':''}<i>›</i></a>`;
+}
+function renderRadio(){
+  if(!['pbs','bcc','more'].includes(RADIO_TAB)) RADIO_TAB='pbs';
+  el('rdTabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.t===RADIO_TAB));
+  let h='';
+  if(RADIO_TAB==='pbs'){
+    h=radioItem(pbsUrl('PBS'),'全國治安交通網','全天路況、治安')+'<div class="rdsub">地區分臺</div>'+
+      radioPbsOrder(GPS.last).map(x=>radioItem(pbsUrl(x.c),'警廣 '+x.n,'',x.near?'最近':'')).join('');
+  } else if(RADIO_TAB==='bcc'){
+    const pf=Native.platform(), ios=pf==='ios'||(pf==='web'&&/iPhone|iPad|iPod/i.test(navigator.userAgent));
+    const and=pf==='android'||(pf==='web'&&/Android/i.test(navigator.userAgent));
+    h=(ios||!and?radioItem(RADIO_BCC_APP.ios,'開啟／安裝「中廣線上聽」','iPhone · App Store'):'')+
+      (and||!ios?radioItem(RADIO_BCC_APP.android,'開啟／安裝「中廣線上聽」','Android · Google Play'):'')+
+      '<div class="rdsub">App 內可收聽：'+RADIO_BCC.map(esc).join('、')+'</div>';
+  } else {
+    h=RADIO_MORE.map(x=>radioItem(x.u,x.n,x.d)).join('');
+  }
+  el('rdList').innerHTML=h;
+}
+function openRadio(){ renderRadio(); el('rdSheet').classList.remove('hidden'); }
+function closeRadio(){ el('rdSheet').classList.add('hidden'); }
+function radioBoot(){
+  el('rdBtn').onclick=openRadio;
+  el('rdX').onclick=closeRadio;
+  el('rdSheet').onclick=e=>{ if(e.target.id==='rdSheet') closeRadio(); };
+  el('rdTabs').onclick=e=>{ const b=e.target.closest('button'); if(!b) return;
+    RADIO_TAB=b.dataset.t; Store.set(K('radioTab'),RADIO_TAB); renderRadio(); };
+  // 點了電台就關掉面板，回來時直接看到地圖
+  el('rdList').addEventListener('click',e=>{ if(e.target.closest('a')) setTimeout(closeRadio,300); });
+}
+
 /* ---------- 17f. 照片 EXIF 取座標（不保存照片） ---------- */
 function exifGPS(buf){
   const dv=new DataView(buf);
@@ -5407,6 +5491,7 @@ function boot(){
   setInterval(pingOnline,60e3);
   // 車隊（跟車）
   convoyBoot();
+  radioBoot();
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pingOnline(); });
   // 對外測試介面
   window.LP={evaluate,dist,bearing,dirHeadings,dirMatch,onPos,CAMS:()=>CAMS,CFG,tierDist,feedUpdate,
@@ -5431,6 +5516,7 @@ function boot(){
              countyOf,coverage,renderCoverage,COUNTIES,
              MAPROT,setMapRotation,screenToLatLng,showKmPop,hideKmPop,paintCone,updateMapPos,
              MAP:()=>MAP,
+             openRadio,renderRadio,radioPbsOrder,RADIO_TAB:()=>RADIO_TAB,
              CONVOY,convoyJoin,convoyLeave,convoyExtend,convoyTick,convoySend,convoyOnPos,cvTrailCut,cvNewCode,openConvoy,drawConvoy,cvMarks,
              ingest,ingestZip,isZip,addPack,textToCams,parseCSV,rowsToCams,
              PACKS:()=>PACKS,clearPacks:()=>{PACKS=[];savePacks();rebuildDB();},
