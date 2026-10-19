@@ -15,6 +15,7 @@
  *   POST /convoy/:code                  車隊：更新自己的位置、拿全隊位置（見 handleConvoy）
  *   GET  /convoy/:code                  車隊：看誰在裡面
  *   POST /convoy/:code/leave            車隊：離開
+ *   GET  /weather?lat=&lon=             所在縣市的天氣特報＋附近雨量站（中央氣象署，見 weatherNear）
  *
  * 自動下架機制（不需要有人顧後台）：
  *   1. 置信度隨時間依類型半衰期衰減
@@ -38,6 +39,8 @@ const TTL = {                      // 各類事件的存活時間（毫秒）
   '施工': 12 * 3600e3,
   '路面坑洞': 24 * 3600e3,
   '積水': 6 * 3600e3,
+  '濃霧': 3 * 3600e3,
+  '大雨': 1 * 3600e3,
   '動物': 1 * 3600e3,
   '臨檢': 3 * 3600e3,
   '其他': 2 * 3600e3,
@@ -55,7 +58,7 @@ const MAX_TTL = 48 * 3600e3;
  */
 const HALF_LIFE_MIN = {
   '事故': 25, '車輛故障': 20, '掉落物': 45, '塞車': 15,
-  '施工': 240, '路面坑洞': 720, '積水': 180, '動物': 20,
+  '施工': 240, '路面坑洞': 720, '積水': 180, '動物': 20, '濃霧': 60, '大雨': 30,
   '臨檢': 60, '其他': 45,
 };
 // 分數低於這個值就不再回傳給客戶端（等於自動下架）
@@ -550,7 +553,10 @@ function officialType(text) {
   if (/事故|碰撞|翻覆|追撞/.test(t)) return '事故';
   if (/拋錨|故障/.test(t)) return '車輛故障';
   if (/障礙物|散落|掉落/.test(t)) return '掉落物';
-  if (/落石|坍方|土石|淹水|積水|災害/.test(t)) return '道路災害';
+  if (/淹水|積水/.test(t)) return '積水';
+  if (/濃霧|起霧|視線不佳|能見度/.test(t)) return '濃霧';
+  if (/豪雨|大雨|強降雨|雨勢/.test(t)) return '大雨';
+  if (/落石|坍方|土石|災害/.test(t)) return '道路災害';
   if (/施工|養護|維修|工程/.test(t)) return '施工';
   if (/封閉|封路|管制/.test(t)) return '道路管制';
   if (/壅塞|回堵/.test(t)) return '塞車';
@@ -784,12 +790,118 @@ async function officialNear(env, lat, lon, r, userHazards, now) {
   return { list: out, t: o.t };
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   天氣：中央氣象署開放資料（授權碼存在 secret CWA_KEY）
+   ───────────────────────────────────────────────────────────
+   W-C0033-001 天氣特報：以縣市為單位（大雨、豪雨、濃霧、陸上強風…）。
+     注意：已經結束的特報也會留在清單裡，一定要看 endTime。
+   O-A0002-001 自動雨量站：全台約 1,300 站，每 10 分鐘更新，有座標與縣市鄉鎮。
+     順便拿來判斷「現在在哪個縣市」：離你最近的雨量站在哪個縣市，你多半就在那裡。
+   排程每 10 分鐘抓一次，整理成一筆存 meta（約 50 KB），查詢時只讀這一筆。
+   出處：中央氣象署（資料開放宣告：可無償利用，需註明出處，不得惡意變更內容）。
+   ═══════════════════════════════════════════════════════════ */
+const WX_KEY = 'wx';
+const WX_STALE_MS = 40 * 60e3;           // 排程停擺超過這麼久就不提供雨量（寧缺勿錯）
+const WX_RAIN_R = 6000;                  // 附近雨量站的範圍（公尺）
+const WX_URL = 'https://opendata.cwa.gov.tw/api/v1/rest/datastore/';
+let wxErr = '';
+
+const twTime = s => {                    // '2026-10-15 22:00:00' 或 ISO（台灣時間）→ 毫秒
+  if (!s) return null;
+  const t = Date.parse(String(s).replace(' ', 'T') + (/[+Z]/.test(String(s).slice(10)) ? '' : '+08:00'));
+  return isFinite(t) ? t : null;
+};
+const rainNum = v => { const n = parseFloat(v); return isFinite(n) && n >= 0 && n < 500 ? n : null; };   // 氣象署用負值表示故障
+
+/** 兩份原始資料 → 精簡格式。抽出來方便測試 */
+function wxCompact(warn, rain, now) {
+  const counties = [], ci = c => { let i = counties.indexOf(c); if (i < 0) { i = counties.length; counties.push(c); } return i; };
+  const alerts = [];
+  for (const l of (warn && warn.records && warn.records.location) || []) {
+    for (const h of (l.hazardConditions && l.hazardConditions.hazards) || []) {
+      const p = h.info && h.info.phenomena, e = twTime(h.validTime && h.validTime.endTime);
+      if (!p || (e != null && e < now)) continue;                // 已經結束的不要
+      alerts.push({ c: l.locationName, p, sig: (h.info.significance || '特報'),
+        s: twTime(h.validTime && h.validTime.startTime), e });
+    }
+  }
+  const st = [];
+  let obs = 0;
+  for (const s of (rain && rain.records && rain.records.Station) || []) {
+    const g = s.GeoInfo || {}, c = (g.Coordinates || []).find(x => x.CoordinateName === 'WGS84');
+    if (!c) continue;
+    const la = parseFloat(c.StationLatitude), lo = parseFloat(c.StationLongitude);
+    if (!isFinite(la) || !isFinite(lo)) continue;
+    const r = s.RainfallElement || {};
+    const p10 = rainNum(r.Past10Min && r.Past10Min.Precipitation), p1 = rainNum(r.Past1hr && r.Past1hr.Precipitation);
+    const t = twTime(s.ObsTime && s.ObsTime.DateTime);
+    if (t && t > obs) obs = t;
+    st.push([Math.round(la * 1e5) / 1e5, Math.round(lo * 1e5) / 1e5, p10, p1, ci(g.CountyName || ''), g.TownName || '', s.StationName || '']);
+  }
+  return { t: now, obs, counties, alerts, st };
+}
+
+async function fetchWeather(env) {
+  wxErr = '';
+  if (!env.CWA_KEY) { wxErr = '未設定 CWA_KEY'; return null; }
+  const get = async (id, q) => {
+    const r = await fetch(WX_URL + id + '?Authorization=' + encodeURIComponent(env.CWA_KEY) + '&format=JSON' + (q || ''));
+    if (!r.ok) throw new Error(id + ' HTTP ' + r.status);
+    const j = await r.json();
+    if (j.success === false || j.success === 'false') throw new Error(id + ' success=false');
+    return j;
+  };
+  try {
+    const [warn, rain] = await Promise.all([
+      get('W-C0033-001'),
+      get('O-A0002-001', '&RainfallElement=Past10Min,Past1hr&GeoInfo=Coordinates,CountyName,TownName'),
+    ]);
+    const wx = wxCompact(warn, rain, Date.now());
+    if (!wx.st.length) { wxErr = '雨量站清單是空的'; return null; }
+    await Store.setMeta(env, WX_KEY, wx, 6 * 3600e3);
+    return { alerts: wx.alerts.length, stations: wx.st.length };
+  } catch (e) { wxErr = String(e && e.message || e); return null; }
+}
+
+/** 所在縣市（看最近的雨量站）、該縣市進行中的特報、附近有在下雨的雨量站 */
+function weatherNear(wx, lat, lon, now) {
+  let near = null, nd = Infinity;
+  const rain = [];
+  for (const s of wx.st) {
+    if (Math.abs(s[0] - lat) > 0.3 || Math.abs(s[1] - lon) > 0.3) continue;
+    const d = distM(lat, lon, s[0], s[1]);
+    if (d < nd) { nd = d; near = s; }
+    if (d <= WX_RAIN_R && ((s[2] || 0) > 0 || (s[3] || 0) > 0))
+      rain.push({ name: s[6], town: s[5], p10: s[2], p1h: s[3], dist: Math.round(d) });
+  }
+  // 離最近的站超過 20 公里（海上、國外）：不知道在哪個縣市
+  const county = near && nd <= 20000 ? wx.counties[near[4]] : '';
+  const town = near && nd <= 20000 ? near[5] : '';
+  const norm = c => String(c || '').replace(/台/g, '臺');
+  const alerts = county ? wx.alerts.filter(a => norm(a.c) === norm(county) && (a.e == null || a.e > now))
+    .map(a => ({ county: a.c, phenomena: a.p, significance: a.sig, start: a.s, end: a.e })) : [];
+  const fresh = now - wx.t < WX_STALE_MS;
+  rain.sort((a, b) => (b.p1h || 0) - (a.p1h || 0) || a.dist - b.dist);
+  return { county, town, alerts, rain: fresh ? rain.slice(0, 5) : [], obs: wx.obs, t: wx.t, stale: !fresh };
+}
+
+async function handleWeather(env, url) {
+  const lat = parseFloat(url.searchParams.get('lat')), lon = parseFloat(url.searchParams.get('lon'));
+  if (!isFinite(lat) || !isFinite(lon)) return json({ error: '需要 lat 與 lon' }, 400);
+  const wx = await Store.meta(env, WX_KEY);
+  if (!wx) return json({ ok: true, none: true, county: '', town: '', alerts: [], rain: [] });
+  return json({ ok: true, ...weatherNear(wx, lat, lon, Date.now()) });
+}
+
 export default {
   /** Cloudflare 排程觸發：對帳官方事件。在 wrangler.toml 設 crons。 */
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const now = Date.now();
       await Store.sweep(env, now);
+      // 天氣每 10 分鐘（每次排程）都抓：氣象署沒有 TDX 那種每月額度問題
+      if (env.CWA_KEY) console.log('weather', JSON.stringify((await fetchWeather(env)) || { err: wxErr }));
       const last = await Store.meta(env, OFFICIAL_LAST_KEY);
       if (!officialDue(now, last && last.t)) return;
       // 不管成功失敗都記下這次有去抓：失敗也算 TDX 的呼叫次數
@@ -809,6 +921,13 @@ export default {
       if (req.method === 'GET' && (p === '/hazards' || p === '/')) return handleQuery(env, url);
       if (req.method === 'POST' && p === '/report') return handleReport(env, req);
       if (req.method === 'POST' && p === '/ping') return handlePing(env, req);
+      if (req.method === 'GET' && p === '/weather') return handleWeather(env, url);
+      if (req.method === 'POST' && p === '/weather/refresh') {
+        if (env.ADMIN_TOKEN && req.headers.get('x-admin-token') !== env.ADMIN_TOKEN)
+          return json({ error: 'unauthorized' }, 401);
+        const r = await fetchWeather(env);
+        return json({ ok: !!r, ...(r || { error: wxErr }) });
+      }
 
       const mc = p.match(/^\/convoy\/([A-Z0-9]{6})(?:\/(leave))?$/);
       if (mc && (req.method === 'POST' || (req.method === 'GET' && !mc[2]))) return handleConvoy(env, req, mc[1], mc[2]);
@@ -833,7 +952,7 @@ export default {
       }
       return json({ error: 'not found', paths: ['/hazards', '/report',
         '/hazards/:id/confirm', '/hazards/:id/clear',
-        '/hazards/:id/retract', '/hazards/:id/probe', '/ping', '/stats', '/convoy/:code'] }, 404);
+        '/hazards/:id/retract', '/hazards/:id/probe', '/ping', '/stats', '/convoy/:code', '/weather'] }, 404);
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }

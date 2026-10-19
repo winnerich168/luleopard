@@ -68,7 +68,7 @@ const BACK = build([[chainOf('國1', [25.1231, 121.7358]), NANKAN, AIRPORT_SYS],
   const LEAFLET = fs.readFileSync(require.resolve('leaflet/dist/leaflet.js'), 'utf8');
   await page.route('**/leaflet*.js', r => r.fulfill({ contentType: 'text/javascript', body: LEAFLET }));
   await page.route('**/leaflet*.css', r => r.fulfill({ contentType: 'text/css', body: '' }));
-  await page.route('**/tile.openstreetmap.org/**', r => r.abort());
+  await page.route(/tile\.openstreetmap\.org|wmts\.nlsc\.gov\.tw/, r => r.abort());
   await page.addInitScript(() => {
     Object.defineProperty(window, 'speechSynthesis', {
       value: { speak: u => (window.__said = window.__said || []).push(u.text), cancel: () => {}, getVoices: () => [], onvoiceschanged: null },

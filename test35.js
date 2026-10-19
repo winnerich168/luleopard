@@ -13,7 +13,7 @@ const path = require('path'), fs = require('fs');
     page.errs = []; page.on('pageerror', e => page.errs.push('PAGEERROR: ' + e.message));
     await page.route('**/leaflet*.js', r => r.fulfill({ contentType: 'text/javascript', body: LEAFLET }));
     await page.route('**/leaflet*.css', r => r.fulfill({ contentType: 'text/css', body: '' }));
-    await page.route('**/tile.openstreetmap.org/**', r => r.abort());
+    await page.route(/tile\.openstreetmap\.org|wmts\.nlsc\.gov\.tw/, r => r.abort());
     await page.addInitScript(native => {
       window.__log = [];
       const t0 = Date.now(), log = m => window.__log.push([Date.now() - t0, m]);

@@ -7,7 +7,7 @@ const path = require('path');
   const page = await (await browser.newContext({ viewport: { width: 414, height: 896 }, locale: 'zh-TW' })).newPage();
   const errs = [];
   page.on('pageerror', e => errs.push('PAGEERROR: ' + e.message));
-  await page.route('**/tile.openstreetmap.org/**', r => r.abort());
+  await page.route(/tile\.openstreetmap\.org|wmts\.nlsc\.gov\.tw/, r => r.abort());
   await page.goto('file://' + path.join(__dirname, 'luleopard.html'));
   await page.waitForTimeout(800);
   await page.click('#btnStart');

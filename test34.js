@@ -12,7 +12,7 @@ const path = require('path'), fs = require('fs');
   const errs = []; page.on('pageerror', e => errs.push('PAGEERROR: ' + e.message));
   await page.route('**/leaflet*.js', r => r.fulfill({ contentType: 'text/javascript', body: LEAFLET }));
   await page.route('**/leaflet*.css', r => r.fulfill({ contentType: 'text/css', body: '' }));
-  await page.route('**/tile.openstreetmap.org/**', r => r.abort());
+  await page.route(/tile\.openstreetmap\.org|wmts\.nlsc\.gov\.tw/, r => r.abort());
   const open = async () => {
     await page.goto('file://' + path.join(__dirname, 'luleopard.html'));
     await page.waitForTimeout(800); await page.click('#btnStart');

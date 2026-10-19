@@ -23,7 +23,7 @@ const fs = require('fs');
   page.on('pageerror', e => errs.push('PAGEERROR: ' + e.message));
   await page.route('**/leaflet*.js', r => r.fulfill({ contentType: 'text/javascript', body: LEAFLET }));
   await page.route('**/leaflet*.css', r => r.fulfill({ contentType: 'text/css', body: '' }));
-  await page.route('**/tile.openstreetmap.org/**', r => r.abort());
+  await page.route(/tile\.openstreetmap\.org|wmts\.nlsc\.gov\.tw/, r => r.abort());
   await page.clock.install({ time: new Date('2026-09-27T08:00:00') });
 
   await page.addInitScript(() => {

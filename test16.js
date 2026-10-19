@@ -21,7 +21,7 @@ const fs = require('fs');
 
   await page.route('**/leaflet*.js', r => r.fulfill({ contentType: 'text/javascript', body: LEAFLET }));
   await page.route('**/leaflet*.css', r => r.fulfill({ contentType: 'text/css', body: LEAFLET_CSS }));
-  await page.route('**/tile.openstreetmap.org/**', r => r.abort());   // 圖磚不需要
+  await page.route(/tile\.openstreetmap\.org|wmts\.nlsc\.gov\.tw/, r => r.abort());   // 圖磚不需要
 
   await page.addInitScript(() => {
     Object.defineProperty(window, 'speechSynthesis', {

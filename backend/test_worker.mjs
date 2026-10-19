@@ -488,6 +488,73 @@ console.log('\n── 車隊（跟車） ──');
   t('滿 8 台再加入回 409', (await call('POST', '/convoy/K7P2QX', { device: 'dfullZ000', label: 'A' })).status === 409);
 }
 
+console.log('\n── 天氣（中央氣象署） ──');
+{
+  const ew = { DB: makeD1(), CWA_KEY: 'CWA-TEST' };
+  const hrs = h => { const d = new Date(Date.now() + 8 * 3600e3 + h * 3600e3); return d.toISOString().slice(0, 19).replace('T', ' '); };
+  const warn = { success: 'true', records: { location: [
+    { locationName: '臺中市', hazardConditions: { hazards: [
+      { info: { phenomena: '大雨', significance: '特報' }, validTime: { startTime: hrs(-1), endTime: hrs(3) } },
+      { info: { phenomena: '陸上強風', significance: '特報' }, validTime: { startTime: hrs(-30), endTime: hrs(-20) } }] } },
+    { locationName: '新北市', hazardConditions: { hazards: [
+      { info: { phenomena: '濃霧', significance: '特報' }, validTime: { startTime: hrs(-1), endTime: hrs(2) } }] } },
+    { locationName: '臺北市', hazardConditions: { hazards: [] } }] } };
+  const stn = (name, la, lo, c, town, p10, p1) => ({ StationName: name, ObsTime: { DateTime: new Date().toISOString() },
+    GeoInfo: { Coordinates: [{ CoordinateName: 'TWD67', StationLatitude: '0', StationLongitude: '0' },
+      { CoordinateName: 'WGS84', StationLatitude: String(la), StationLongitude: String(lo) }], CountyName: c, TownName: town },
+    RainfallElement: { Past10Min: { Precipitation: String(p10) }, Past1hr: { Precipitation: String(p1) } } });
+  const rain = { success: 'true', records: { Station: [
+    stn('臺中', 24.1477, 120.6736, '臺中市', '北區', 6.5, 42.0),
+    stn('大里', 24.1000, 120.6800, '臺中市', '大里區', 1.0, 8.0),
+    stn('故障站', 24.1480, 120.6740, '臺中市', '北區', -998, -998),
+    stn('板橋', 25.0130, 121.4630, '新北市', '板橋區', 0, 0),
+    stn('信義', 25.0330, 121.5650, '臺北市', '信義區', 0, 0)] } };
+  const realFetch = globalThis.fetch, calls = [];
+  globalThis.fetch = async u => { calls.push(String(u));
+    const b = /W-C0033-001/.test(u) ? warn : /O-A0002-001/.test(u) ? rain : null;
+    return b ? new Response(JSON.stringify(b)) : new Response('no', { status: 404 }); };
+  const w = []; await worker.scheduled({}, ew, { waitUntil: p => w.push(p) }); await Promise.all(w);
+  globalThis.fetch = realFetch;
+  t('排程有去抓特報與雨量', calls.some(u => /W-C0033-001/.test(u)) && calls.some(u => /O-A0002-001/.test(u)), calls);
+  t('授權碼有帶上', calls.every(u => /Authorization=CWA-TEST/.test(u)));
+  const q = async (la, lo) => (await worker.fetch(new Request(BASE + `/weather?lat=${la}&lon=${lo}`), ew)).json();
+  const tc = await q(24.15, 120.675);
+  t('臺中：判斷出縣市鄉鎮', tc.county === '臺中市' && tc.town === '北區', tc);
+  t('臺中：只給進行中的大雨特報（過期的強風不給）', tc.alerts.length === 1 && tc.alerts[0].phenomena === '大雨', tc.alerts);
+  t('臺中：附近雨量依時雨量排序、故障值不算', tc.rain.length === 2 && tc.rain[0].name === '臺中' && tc.rain[0].p1h === 42 && !tc.rain.some(r => r.name === '故障站'), tc.rain);
+  const nb = await q(25.014, 121.464);
+  t('新北：濃霧特報、沒下雨', nb.county === '新北市' && nb.alerts[0].phenomena === '濃霧' && nb.rain.length === 0, nb);
+  t('臺北：沒有特報', (await q(25.033, 121.565)).alerts.length === 0);
+  t('海上（離雨量站太遠）：不判斷縣市', (await q(23.5, 119.0)).county === '');
+  t('缺座標回 400', (await worker.fetch(new Request(BASE + '/weather?lat=x'), ew)).status === 400);
+  // 排程停擺太久：雨量不給，特報照給（特報有結束時間）
+  const m = await ew.DB.prepare('SELECT v FROM meta WHERE k = ?1').bind('wx').first();
+  const v = JSON.parse(m.v); v.t -= 60 * 60e3;
+  await ew.DB.prepare('UPDATE meta SET v = ?1 WHERE k = ?2').bind(JSON.stringify(v), 'wx').run();
+  const old = await q(24.15, 120.675);
+  t('資料太舊：雨量不給、標記 stale', old.stale && old.rain.length === 0 && old.alerts.length === 1, old);
+  // 沒設金鑰：不抓、不出錯
+  const e0 = { DB: makeD1() }, c0 = [];
+  globalThis.fetch = async u => { c0.push(u); return new Response('{}'); };
+  const w0 = []; await worker.scheduled({}, e0, { waitUntil: p => w0.push(p) }); await Promise.all(w0);
+  globalThis.fetch = realFetch;
+  t('沒設金鑰時不去抓氣象署', !c0.some(u => /cwa/.test(String(u))));
+  const none = await (await worker.fetch(new Request(BASE + '/weather?lat=24&lon=121'), e0)).json();
+  t('還沒有資料時回空的', none.ok && none.none && none.alerts.length === 0, none);
+}
+
+console.log('\n── 官方事件：天候類 ──');
+{
+  // officialType 沒匯出，用 TDX 事件格式走一次 reconcile 太重；直接驗類型對應（從原始碼取出函式）
+  const src = (await import('node:fs')).readFileSync(new URL('./worker.js', import.meta.url), 'utf8');
+  const fn = new Function(src.match(/function officialType\(text\) \{[\s\S]*?\n\}/)[0] + '; return officialType;')();
+  t('濃霧', fn('國道3號 濃霧 視線不佳') === '濃霧');
+  t('大雨', fn('豪雨 路面積滑') === '大雨');
+  t('積水（不再歸道路災害）', fn('路面積水') === '積水' && fn('淹水') === '積水');
+  t('落石仍是道路災害', fn('落石') === '道路災害');
+  t('事故不受影響', fn('追撞事故') === '事故');
+}
+
 console.log('\n── 沒綁資料庫時要講清楚 ──');
 {
   const res = await worker.fetch(new Request(BASE + '/hazards?lat=25&lon=121'), {});

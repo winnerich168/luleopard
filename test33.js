@@ -34,7 +34,7 @@ const hav = (a, b, c, d) => Math.hypot((c - a) * 111320, (d - b) * 111320 * Math
       const res = await worker.fetch(new Request(q.url(), { method: q.method(), headers: { 'content-type': 'application/json' }, body: body || undefined }), env);
       r.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: await res.text() });
     });
-    await page.route('**/tile.openstreetmap.org/**', r => r.abort());
+    await page.route(/tile\.openstreetmap\.org|wmts\.nlsc\.gov\.tw/, r => r.abort());
     await page.addInitScript(() => {
       Object.defineProperty(window, 'speechSynthesis', { value: { speak: u => (window.__said = window.__said || []).push(u.text), cancel: () => {}, getVoices: () => [], onvoiceschanged: null }, configurable: true });
       window.SpeechSynthesisUtterance = function (t) { this.text = t; }; navigator.vibrate = () => true;

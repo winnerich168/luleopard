@@ -214,13 +214,15 @@ textarea{resize:vertical;min-height:74px}
 #fabMenuBar i.run{animation:fabCountdown var(--fabms,6000ms) linear forwards}
 @keyframes fabCountdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}
 /* ---------- 車隊（跟車） ---------- */
-#cvBtn,#rdBtn{position:absolute;left:12px;top:12px;z-index:900;display:flex;align-items:center;gap:6px;
+#cvBtn,#rdBtn,#wxBtn{position:absolute;left:12px;top:12px;z-index:900;display:flex;align-items:center;gap:6px;
   padding:9px 14px;border-radius:22px;background:#1d2836;border:2px solid rgba(255,255,255,.22);
   box-shadow:0 6px 20px rgba(0,0,0,.55);font-size:14px;font-weight:700}
 #cvBtn.on{background:#2a2410;border-color:var(--accent);color:#ffe6a8}
 #cvBtn.err{border-color:var(--warn)}
-#cvBtn:active,#rdBtn:active{transform:scale(.95)}
+#cvBtn:active,#rdBtn:active,#wxBtn:active{transform:scale(.95)}
 #rdBtn{top:62px}
+#wxBtn{top:112px}
+#wxBtn.alert{background:#3a2a0c;border-color:var(--warn);color:#ffe6a8}
 /* ---------- 電台 ---------- */
 .rdtabs{display:flex;gap:6px;background:var(--panel2);border-radius:12px;padding:4px;margin-bottom:10px}
 .rdtabs button{flex:1;min-height:42px;border-radius:9px;font-size:15px;font-weight:700;color:var(--dim)}
@@ -235,6 +237,19 @@ textarea{resize:vertical;min-height:74px}
 .rditem em{font-style:normal;font-size:11px;font-weight:800;background:var(--ok);color:#06210f;border-radius:6px;padding:2px 6px}
 .rditem i{font-style:normal;color:var(--dim);font-size:18px}
 .rdsub{font-size:12px;color:var(--dim);margin:10px 2px 4px}
+/* ---------- 天氣 ---------- */
+.wxinfo{background:var(--panel2);border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.75}
+.wxinfo b{font-size:15px}
+.wxinfo .al{color:var(--warn);font-weight:800}
+.wxinfo .dim{color:var(--dim);font-size:11.5px}
+.wxbtns{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.wxbtns button{min-height:88px;border-radius:16px;font-size:15px;font-weight:800;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:6px;border:2px solid rgba(255,255,255,.18);color:#fff}
+.wxbtns button b{font-size:32px;font-weight:400;line-height:1}
+.wxbtns button:active{transform:scale(.94)}
+.wxbtns [data-wx="積水"]{background:linear-gradient(160deg,#2f8de4,#1a5fb4)}
+.wxbtns [data-wx="濃霧"]{background:linear-gradient(160deg,#8a97a8,#56606e)}
+.wxbtns [data-wx="大雨"]{background:linear-gradient(160deg,#3d6fa8,#25456f)}
 .cvsheet,.cvprompt{position:fixed;inset:0;z-index:1800;background:rgba(4,7,11,.72);display:flex;
   align-items:flex-end;justify-content:center;padding:0 12px calc(12px + var(--safe-b))}
 .cvprompt{z-index:2100;align-items:center}
@@ -422,6 +437,8 @@ textarea{resize:vertical;min-height:74px}
     <button id="cvBtn" title="車隊跟車">🚗 <span id="cvBtnTx">車隊</span></button>
     <!-- 電台：連到各電台官方收聽頁 -->
     <button id="rdBtn" title="電台">📻 <span>電台</span></button>
+    <!-- 天氣：所在縣市特報＋附近雨量，一鍵回報積水／濃霧／大雨 -->
+    <button id="wxBtn" title="天氣">🌧 <span id="wxBtnTx">天氣</span></button>
     <!-- 經過剛提醒過的事件後：一鍵回報還在／已經沒有了（15 秒自動消失） -->
     <div id="passCard"><div class="hd"><b id="passTx"></b><span id="passSub"></span><i id="passX">×</i></div>
       <div class="bt"><button id="passStill">還在</button><button id="passGone">已經沒有了</button></div></div>
@@ -735,6 +752,8 @@ textarea{resize:vertical;min-height:74px}
         </select></div>
       <div class="row"><div><label>通過提示</label><div class="hint">開過測速照相後提示「已通過」，讓你知道警示結束了</div></div>
         <div class="sw"><input type="checkbox" id="sPass" checked><span></span></div></div>
+      <div class="row"><div><label>天氣提醒</label><div class="hint">所在縣市發布大雨、豪雨、濃霧、強風特報，或附近雨勢很大時唸一次</div></div>
+        <div class="sw"><input type="checkbox" id="sWx" checked><span></span></div></div>
       <div class="row"><div><label>螢幕常亮</label><div class="hint" id="wakeHint">開啟網頁後就避免螢幕自動關閉</div></div>
         <div class="sw"><input type="checkbox" id="sWake" checked><span></span></div></div>
       <div class="row"><div><label>靜止自動省電</label><div class="hint">停車後降低定位頻率，開始行駛自動恢復</div></div>
@@ -791,6 +810,7 @@ textarea{resize:vertical;min-height:74px}
           <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> 使用；
           本 App 產出的路網衍生資料庫亦以 ODbL 授權釋出。<br>
           <b>路況事件</b>：交通部 TDX 運輸資料流通服務（由鹿豹伺服器取得）。<br>
+          <b>天氣特報與雨量</b>：中央氣象署 開放資料（天氣特報、自動雨量站，由鹿豹伺服器取得）。<br>
           <b>程式庫</b>：Leaflet 1.9.4（BSD-2-Clause）、fflate 0.8.2（MIT）。<br>
           <span style="opacity:.8">資料由各機關提供，本工具不保證其正確性、完整性或即時性。</span>
         </div>
@@ -829,6 +849,17 @@ textarea{resize:vertical;min-height:74px}
     <div id="cvList" class="cvlist"></div>
     <div id="cvErr2" class="cverr"></div>
     <button id="cvLeave" class="btn danger cvgo">離開車隊</button>
+  </div>
+</div></div>
+<!-- ══════════ 天氣 ══════════ -->
+<div id="wxSheet" class="cvsheet hidden"><div class="cvbox">
+  <div class="cvhd"><b>🌧 天氣</b><i id="wxX">×</i></div>
+  <div id="wxInfo" class="wxinfo"></div>
+  <div class="rdsub">一鍵回報（附近的人會收到提醒，6 秒內可復原）</div>
+  <div class="wxbtns">
+    <button data-wx="積水"><b>💧</b>積水</button>
+    <button data-wx="濃霧"><b>🌫️</b>濃霧</button>
+    <button data-wx="大雨"><b>🌧️</b>大雨</button>
   </div>
 </div></div>
 <!-- ══════════ 電台 ══════════ -->
@@ -944,7 +975,7 @@ const HAZ_API=(location.protocol==='file:'&&!window.Capacitor)? ''
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
            alertK:5,t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:DATA_BASE+'speedcams.min.json',feedAuto:true,feedLast:0,feedCount:0,
-           hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,mapStyle:'nlsc',kmPopSec:10,icNotice:true,icDist:2000,
+           hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,wxNotice:true,mapRotate:true,mapStyle:'nlsc',kmPopSec:10,icNotice:true,icDist:2000,
            powerSave:true,powerAfterMin:5,
            roadUrl:DATA_BASE+'roadgraph.min.json',roadLast:0,roadCount:0,
            camRoadUrl:DATA_BASE+'camroads.min.json',camRoadLast:0};
@@ -2101,6 +2132,7 @@ function onPos(lat,lon,heading,speed,acc,simulated){
   }
   // 自動接收附近回報（每 3 分鐘）
   if(CFG.hazAuto&&CFG.hazUrl&&Date.now()-(CFG.hazLast||0)>18e4&&!simulated) pullHazards(p,true);
+  if(!simulated) pullWeather(p);
 }
 
 function startGPS(){
@@ -2405,6 +2437,9 @@ function setMapRotation(heading){
   const wrap=el('mapRot'); if(!wrap) return;
   if(!MAPROT.on||heading==null||isNaN(heading)){
     if(MAPROT.deg!==0){ MAPROT.deg=0; el('map').style.transform=''; }
+    /* 關掉旋轉要立刻回正。轉到一半的動畫不取消的話會繼續播完，
+       這段時間點地圖、看樁號換算出來的位置是歪的（容器量起來還是斜的） */
+    try{ el('map').getAnimations().forEach(a=>a.cancel()); }catch(e){}
     if(wrap.classList.contains('rot')){
       wrap.classList.remove('rot'); sizeRot();
       if(MAP) setTimeout(()=>{ try{ MAP.invalidateSize({animate:false}); }catch(e){} },0);
@@ -2976,6 +3011,8 @@ const HAZ_TYPES=[
   {k:'施工',    i:'🚧', sev:2, ttl:12*3600e3},
   {k:'路面坑洞',i:'🕳️', sev:2, ttl:24*3600e3},
   {k:'積水',    i:'💧', sev:2, ttl:6*3600e3},
+  {k:'濃霧',    i:'🌫️', sev:2, ttl:3*3600e3},
+  {k:'大雨',    i:'🌧️', sev:2, ttl:1*3600e3},
   {k:'動物',    i:'🐕', sev:2, ttl:1*3600e3},
   {k:'臨檢',    i:'👮', sev:1, ttl:3*3600e3},
 ];
@@ -2989,7 +3026,7 @@ const hazMeta=k=>HAZ_TYPES.find(x=>x.k===k)||HAZ_EXTRA.find(x=>x.k===k)||{k,i:'�
 
 /* 置信度半衰期（分鐘）。跟後端同一組數字，沒連後端時本機也能自己衰減。 */
 const HALF_LIFE={'事故':25,'車輛故障':20,'掉落物':45,'塞車':15,'施工':240,
-                 '路面坑洞':720,'積水':180,'動物':20,'臨檢':60};
+                 '路面坑洞':720,'積水':180,'動物':20,'臨檢':60,'濃霧':60,'大雨':30};
 /**
  * 這件事是多久以前通報的。官方事件用官方標的發生時間（後端每次都把 t 設成現在，不能用）；
  * 用路人回報用「最近一次有人回報／確認」的時間。不知道就回傳 null。
@@ -3335,9 +3372,14 @@ async function pushHazard(h){
     h.synced=true;
     if(j.hazard){ h.serverId=j.hazard.id; h.reports=j.hazard.reports; h.confirms=j.hazard.confirms;
                   h.expires=j.hazard.expires; }
+    if(h.undone){ if(h.serverId) retractHazard(h); return; }     // 上傳途中已按復原
     saveHazards(); renderHazards(); drawHazLayer();
-    toast(j.merged? ('附近已有同類回報，已幫你加上確認，目前共 '+(j.hazard?j.hazard.reports:'?')+' 人回報')
-                  : '已上傳，附近的人會收到提醒');
+    const msg=j.merged? ('附近已有同類回報，已幫你加上確認，目前共 '+(j.hazard?j.hazard.reports:'?')+' 人回報')
+                      : '已上傳，附近的人會收到提醒';
+    // 一鍵通報的「復原」還在畫面上：不要把它蓋掉，旁邊註記就好
+    const st=el('undoSt');
+    if(undoId===h.id&&st&&el('toast').classList.contains('show')) st.textContent='· '+(j.merged?'已加上確認':'已上傳');
+    else toast(msg);
   }catch(e){ toast('回報已存在本機，上傳失敗：'+e.message,4000); }
 }
 /** 撤銷自己的回報。本人按錯／看錯，立即生效，不需要別人投票。 */
@@ -3734,6 +3776,93 @@ function convoyBoot(){
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden) convoyTick(); });
 }
 
+/* ---------- 17e4. 天氣 ----------
+   後端每 10 分鐘抓中央氣象署：所在縣市的特報（大雨、豪雨、濃霧、強風…）＋附近雨量站。
+   開車時每 10 分鐘問一次；進到有特報的縣市唸一次，附近雨勢很大也唸（30 分鐘內不重複，變更大才再唸）。
+   官方沒有「哪個路段積水／起霧」的資料，所以面板下方給三顆一鍵回報，走跟掉落物一樣的回報機制。 */
+const WX={data:null,at:0,busy:false,err:'',rainLv:0,rainAt:0};
+const WX_EVERY=10*60e3, WX_SPEAK=/雨|霧|風|颱/;      // 低溫、高溫特報跟開車關係不大，不唸
+const wxSaid=new Map(Object.entries(Store.get(K('wxSaid'),{})));
+function wxRainLevel(r){ if(!r) return 0;
+  const p1=r.p1h||0, p10=r.p10||0;
+  return (p1>=40||p10>=10)?2 : (p1>=20||p10>=5)?1 : 0; }
+async function pullWeather(p,force){
+  const base=(CFG.hazUrl||'').replace(/\/+$/,'');
+  if(!base||!p||WX.busy) return;
+  if(!force&&Date.now()-WX.at<WX_EVERY) return;
+  WX.busy=true; WX.at=Date.now();
+  try{
+    const r=await fetch(base+'/weather?lat='+p.lat.toFixed(4)+'&lon='+p.lon.toFixed(4));
+    const j=await r.json();
+    if(!r.ok||!j.ok) throw new Error(j.error||('HTTP '+r.status));
+    WX.data=j; WX.err='';
+    wxAnnounce(j);
+  }catch(e){ WX.err='取不到天氣資料（'+e.message+'）'; }
+  finally{ WX.busy=false; paintWx(); }
+}
+function wxAnnounce(j){
+  if(CFG.wxNotice===false) return;
+  const now=Date.now();
+  // 特報：同一則（縣市＋現象＋結束時間）只唸一次，重開 App 也不重唸
+  for(const a of j.alerts||[]){
+    if(!WX_SPEAK.test(a.phenomena)) continue;
+    const k=a.county+'|'+a.phenomena+'|'+(a.end||'');
+    if(wxSaid.has(k)) continue;
+    wxSaid.set(k,a.end||now+6*3600e3);
+    Audio_.say(a.county+'發布'+a.phenomena+(a.significance||'特報')+'，請小心駕駛');
+  }
+  for(const [k,e] of wxSaid) if(e<now) wxSaid.delete(k);
+  Store.set(K('wxSaid'),Object.fromEntries(wxSaid));
+  // 附近雨勢：只看 3 公里內最大的那站
+  const r=(j.rain||[]).filter(x=>x.dist<=3000).sort((a,b)=>(b.p1h||0)-(a.p1h||0))[0];
+  const lv=wxRainLevel(r);
+  if(lv&&(lv>WX.rainLv||now-WX.rainAt>30*60e3)){
+    Audio_.say((lv===2?'附近豪大雨':'附近雨勢很大')+'，一小時雨量'+Math.round(r.p1h||0)+'毫米，請減速慢行');
+    WX.rainAt=now;
+  }
+  WX.rainLv=lv;
+}
+const wxHm=t=>t?new Date(t).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false}):'';
+function paintWx(){
+  const j=WX.data, b=el('wxBtn');
+  const al=j&&(j.alerts||[]).filter(a=>WX_SPEAK.test(a.phenomena));
+  b.classList.toggle('alert',!!(al&&al.length));
+  el('wxBtnTx').textContent= al&&al.length? al[0].phenomena+(al.length>1?'…':'')+'特報' : '天氣';
+  if(el('wxSheet').classList.contains('hidden')) return;
+  let h='';
+  if(!GPS.last) h='等待定位…';
+  else if(!j) h=WX.err? esc(WX.err) : (CFG.hazUrl?'讀取中…':'沒有設定共享伺服器（設定 → 路況共享）');
+  else if(j.none) h='伺服器還沒有天氣資料';
+  else {
+    h='<b>'+esc(j.county?j.county+' '+j.town:'不在臺灣本島附近')+'</b><br>';
+    h+= (j.alerts||[]).length
+      ? j.alerts.map(a=>'<span class="al">⚠ '+esc(a.phenomena+(a.significance||'特報'))+'</span>'+(a.end?'（至 '+wxHm(a.end)+'）':'')).join('<br>')
+      : '目前沒有天氣特報';
+    h+='<br>';
+    const r=(j.rain||[])[0];
+    h+= j.stale? '雨量資料暫時沒有更新'
+      : r? '附近雨量：'+esc(r.name)+'（'+fmtKm(r.dist)+'）一小時 <b>'+(r.p1h||0)+'</b> 毫米 · 10 分鐘 '+(r.p10||0)+' 毫米'
+      : '附近 6 公里內雨量站都沒有下雨';
+    h+='<br><span class="dim">中央氣象署'+(j.obs?' · '+wxHm(j.obs)+' 觀測':'')+'。特報以縣市為單位，路段實況請看回報。</span>';
+  }
+  el('wxInfo').innerHTML=h;
+}
+function openWeather(){
+  el('wxSheet').classList.remove('hidden'); paintWx();
+  if(GPS.last&&Date.now()-WX.at>2*60e3) pullWeather(GPS.last,true);
+}
+function closeWeather(){ el('wxSheet').classList.add('hidden'); }
+function weatherBoot(){
+  el('wxBtn').onclick=openWeather;
+  el('wxX').onclick=closeWeather;
+  el('wxSheet').onclick=e=>{
+    if(e.target.id==='wxSheet'){ closeWeather(); return; }
+    const b=e.target.closest('[data-wx]'); if(!b) return;
+    closeWeather(); quickReport(b.dataset.wx);
+  };
+  paintWx();
+}
+
 /* ---------- 17e3. 電台 ----------
    連到各電台官方的線上收聽頁，不在 App 裡轉播（轉播要電台授權）。
    警廣放最前面：整天報路況，分台依目前位置排序，最近的標「最近」。
@@ -4019,10 +4148,15 @@ function quickReport(type){
   Audio_.beep(880,.1); Audio_.vibe([60,40,60]);
   undoId=h.id; clearTimeout(undoTimer);
   const t=el('toast');
-  t.innerHTML=`已通報 <b>${esc(type)}</b> <button id="undoBtn" class="btn sm" style="margin-left:10px">復原</button>`;
+  t.innerHTML=`已通報 <b>${esc(type)}</b><span id="undoSt" style="opacity:.75;margin-left:6px;font-size:12px"></span> <button id="undoBtn" class="btn sm" style="margin-left:10px">復原</button>`;
   t.classList.add('show'); t.style.pointerEvents='auto';
-  el('undoBtn').onclick=()=>{ removeHazard(undoId); t.classList.remove('show');
-    t.style.pointerEvents='none'; toast('已復原'); };
+  /* 復原要連伺服器上的一起撤回，不然附近的人照樣收到提醒。
+     還在上傳中就按復原：先標記，pushHazard 拿到伺服器編號後自己撤回。 */
+  el('undoBtn').onclick=()=>{ t.classList.remove('show'); t.style.pointerEvents='none';
+    const x=HAZARDS.find(z=>z.id===undoId);
+    if(x&&x.serverId){ retractHazard(x); return; }
+    if(x) x.undone=true;
+    removeHazard(undoId); toast('已復原'); };
   undoTimer=setTimeout(()=>{ t.classList.remove('show'); t.style.pointerEvents='none'; },6000);
 }
 
@@ -5051,7 +5185,7 @@ function bind(){
     e.onchange=()=>{ CFG[key]=e.checked; saveCfg(); after&&after(); }; };
   sw('sVoice','voice'); sw('sBeep','beep'); sw('sVibe','vibe');
   sw('sDir','dirFilter',()=>state.clear()); sw('sOnlyOver','onlyOver');
-  sw('sPass','passNotice');
+  sw('sPass','passNotice'); sw('sWx','wxNotice');
   sw('sRot','mapRotate',()=>{ MAPROT.on=CFG.mapRotate!==false;
     if(!MAPROT.on) setMapRotation(null);
     else if(GPS.last) setMapRotation(GPS.last.headingOk===false?null:GPS.last.heading);
@@ -5558,6 +5692,7 @@ function boot(){
   // 轉手機橫直、視窗大小改變：旋轉中的地圖要重新量
   window.addEventListener('resize',()=>{ if(el('mapRot').classList.contains('rot')){ sizeRot(); if(MAP) MAP.invalidateSize({animate:false}); } });
   radioBoot();
+  weatherBoot();
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pingOnline(); });
   // 對外測試介面
   window.LP={evaluate,dist,bearing,dirHeadings,dirMatch,onPos,CAMS:()=>CAMS,CFG,tierDist,feedUpdate,
@@ -5583,6 +5718,7 @@ function boot(){
              TILES,BASE,setBaseMap,BASE_FAIL,sizeRot,
              MAPROT,setMapRotation,screenToLatLng,showKmPop,hideKmPop,paintCone,updateMapPos,
              MAP:()=>MAP,
+             WX,pullWeather,wxAnnounce,wxRainLevel,paintWx,openWeather,wxSaid,
              openRadio,renderRadio,radioPbsOrder,RADIO_TAB:()=>RADIO_TAB,
              CONVOY,convoyJoin,convoyLeave,convoyExtend,convoyTick,convoySend,convoyOnPos,cvTrailCut,cvNewCode,openConvoy,drawConvoy,cvMarks,
              ingest,ingestZip,isZip,addPack,textToCams,parseCSV,rowsToCams,
