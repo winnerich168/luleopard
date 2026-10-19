@@ -69,6 +69,9 @@ const path = require('path'), fs = require('fs');
   L = await log(W);
   ok(L.join() === 'web:前方測速照相', '網頁版語音不對：' + L);
 
+  // 電台面板：網頁版要提醒「切去聽電台警示會停」，App 有背景定位不用
+  await A.click('#rdBtn'); ok(await A.isHidden('#rdWebWarn'), 'App 版不該出現網頁版電台警告');
+  await W.click('#rdBtn'); ok(await W.isVisible('#rdWebWarn'), '網頁版電台面板沒有「警示會停止」的提醒');
   fails.push(...A.errs, ...W.errs);
   await browser.close();
   console.log(fails.length ? '✗ ' + fails.join('\n✗ ') : '✓ test35 播報時電台暫停');

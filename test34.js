@@ -21,6 +21,7 @@ const path = require('path'), fs = require('fs');
   ok(await page.isVisible('#rdBtn'), '地圖上沒有電台按鈕');
   await page.click('#rdBtn');
   const tabs = await page.$$eval('#rdTabs button', b => b.map(x => x.textContent));
+  ok(/警示會停止/.test(await page.textContent('#rdWebWarn')) && await page.isVisible('#rdWebWarn'), '網頁版沒顯示「警示會停止」提醒');
   ok(tabs.join() === '警廣,中廣,其他', '子分頁順序不對：' + tabs);
   ok(await page.textContent('#rdTabs button.on') === '警廣', '預設不是警廣分頁');
   let items = await page.$$eval('#rdList a', a => a.map(x => ({ t: x.querySelector('b').textContent, h: x.href, b: (x.querySelector('em') || {}).textContent || '', tg: x.target })));

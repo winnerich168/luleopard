@@ -237,6 +237,7 @@ textarea{resize:vertical;min-height:74px}
 .rditem em{font-style:normal;font-size:11px;font-weight:800;background:var(--ok);color:#06210f;border-radius:6px;padding:2px 6px}
 .rditem i{font-style:normal;color:var(--dim);font-size:18px}
 .rdsub{font-size:12px;color:var(--dim);margin:10px 2px 4px}
+.rdwarn{background:#3a3110;border:1px solid var(--warn);color:#ffe6a8;border-radius:10px;padding:8px 10px;font-size:13px;line-height:1.45;margin-bottom:8px}
 /* ---------- 天氣 ---------- */
 .wxinfo{background:var(--panel2);border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.75}
 .wxinfo b{font-size:15px}
@@ -875,8 +876,9 @@ textarea{resize:vertical;min-height:74px}
 <div id="rdSheet" class="cvsheet hidden"><div class="cvbox">
   <div class="cvhd"><b>📻 電台</b><i id="rdX">×</i></div>
   <div id="rdTabs" class="rdtabs"><button data-t="pbs">警廣</button><button data-t="bcc">中廣</button><button data-t="more">其他</button></div>
+  <div id="rdWebWarn" class="rdwarn hidden">⚠️ <b>網頁版切去聽電台後，警示會停止</b>（瀏覽器在背景不給定位）。要邊聽電台邊提醒，請用鹿豹 App。</div>
   <div id="rdList" class="rdlist"></div>
-  <div class="cvnote">點了會開啟電台的官方收聽頁面（中廣要用官方 App 收聽）。<b>App 版播報警示時電台會自動暫停</b>，唸完恢復（網頁版做不到，警示會跟電台疊在一起）。請在停車時選好再出發，行進中請勿操作手機。</div>
+  <div class="cvnote">點了會開啟電台的官方收聽頁面（中廣要用官方 App 收聽）。<b>App 版播報警示時電台會自動暫停</b>，唸完恢復（網頁版做不到）。請在停車時選好再出發，行進中請勿操作手機。</div>
 </div></div>
 <div id="cvPrompt" class="cvprompt hidden"><div class="cvbox">
   <div class="cvbig" id="cvPromptN">10</div>
@@ -969,7 +971,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261019.1757';
+const APP_BUILD='20261019.1812';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -3920,7 +3922,9 @@ function renderRadio(){
   }
   el('rdList').innerHTML=h;
 }
-function openRadio(){ renderRadio(); el('rdSheet').classList.remove('hidden'); }
+function openRadio(){ renderRadio();
+  el('rdWebWarn').classList.toggle('hidden',Native.platform()!=='web');   // App 有背景定位，不用提醒
+  el('rdSheet').classList.remove('hidden'); }
 function closeRadio(){ el('rdSheet').classList.add('hidden'); }
 function radioBoot(){
   el('rdBtn').onclick=openRadio;
