@@ -727,6 +727,11 @@ textarea{resize:vertical;min-height:74px}
         <div class="sw"><input type="checkbox" id="sOnlyOver"><span></span></div></div>
       <div class="row"><div><label>車頭向前</label><div class="hint">地圖跟著行進方向轉，車頭永遠朝上；關閉則北方朝上</div></div>
         <div class="sw"><input type="checkbox" id="sRot" checked><span></span></div></div>
+      <div class="row"><div><label>地圖樣式</label><div class="hint">國土測繪中心的門牌較完整（放到最大）；載不到時自動改用 OpenStreetMap</div></div>
+        <select id="mapStyle">
+          <option value="nlsc">國土測繪中心</option>
+          <option value="osm">OpenStreetMap</option>
+        </select></div>
       <div class="row"><label>點地圖顯示樁號</label>
         <select id="kmPopSec">
           <option value="0">關閉</option>
@@ -789,7 +794,9 @@ textarea{resize:vertical;min-height:74px}
           <b>測速點位</b>：內政部警政署國道公路警察局「國道公路固定式測速照相地點」、
           內政部警政署「測速執法設置點」及各縣市政府警察局公布之測速照相地點，
           依<a href="https://data.gov.tw/license" target="_blank" rel="noopener">政府資料開放授權條款第1版</a>使用。<br>
-          <b>地圖與路網</b>：© OpenStreetMap contributors，依
+          <b>底圖</b>：內政部國土測繪中心「通用版電子地圖」，依該中心
+          <a href="https://maps.nlsc.gov.tw/pro/use_clause.jsp" target="_blank" rel="noopener">國土測繪圖資服務雲使用條款</a>使用。<br>
+          <b>路網與備援底圖</b>：© OpenStreetMap contributors，依
           <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> 使用；
           本 App 產出的路網衍生資料庫亦以 ODbL 授權釋出。<br>
           <b>路況事件</b>：交通部 TDX 運輸資料流通服務（由鹿豹伺服器取得）。<br>
@@ -838,7 +845,7 @@ textarea{resize:vertical;min-height:74px}
   <div class="cvhd"><b>📻 電台</b><i id="rdX">×</i></div>
   <div id="rdTabs" class="rdtabs"><button data-t="pbs">警廣</button><button data-t="bcc">中廣</button><button data-t="more">其他</button></div>
   <div id="rdList" class="rdlist"></div>
-  <div class="cvnote">點了會開啟電台的官方收聽頁面（中廣要用官方 App 收聽）。請在停車時選好再出發，行進中請勿操作手機。</div>
+  <div class="cvnote">點了會開啟電台的官方收聽頁面（中廣要用官方 App 收聽）。<b>App 版播報警示時電台會自動暫停</b>，唸完恢復（網頁版做不到，警示會跟電台疊在一起）。請在停車時選好再出發，行進中請勿操作手機。</div>
 </div></div>
 <div id="cvPrompt" class="cvprompt hidden"><div class="cvbox">
   <div class="cvbig" id="cvPromptN">10</div>
@@ -931,7 +938,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261019.1125';
+const APP_BUILD='20261019.1214';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -946,7 +953,7 @@ const HAZ_API=(location.protocol==='file:'&&!window.Capacitor)? ''
 const DEF={voice:true,beep:true,vibe:true,dirFilter:true,onlyOver:false,wake:true,
            alertK:5,t1:600,t2:300,t3:120,simSpd:70,
            feedUrl:DATA_BASE+'speedcams.min.json',feedAuto:true,feedLast:0,feedCount:0,
-           hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,kmPopSec:10,icNotice:true,icDist:2000,
+           hazUrl:HAZ_API,hazAuto:true,hazLast:0,probeSend:true,useSeed:true,passNotice:true,mapRotate:true,mapStyle:'nlsc',kmPopSec:10,icNotice:true,icDist:2000,
            powerSave:true,powerAfterMin:5,
            roadUrl:DATA_BASE+'roadgraph.min.json',roadLast:0,roadCount:0,
            camRoadUrl:DATA_BASE+'camroads.min.json',camRoadLast:0};
@@ -1279,10 +1286,24 @@ const Audio_=(function(){
   const SAY_STALE=8000;
   const sayQ=[];
   let sayBusy=false, sayGen=0, sayWatch=null, sayUtter=null;
+  /* 電台／音樂（其他 App）在播時：唸之前請系統讓它暫停，整串唸完再還回去（只有 App 版做得到）。
+     唸完等一下才還：連續幾句之間不要讓電台冒出來又被切掉。 */
+  let focusOn=false, focusT=null;
+  function focusGrab(){
+    clearTimeout(focusT);
+    if(focusOn||!Native.hasFocus) return Promise.resolve();
+    focusOn=true;
+    return Native.focus();
+  }
+  function focusRelease(){
+    clearTimeout(focusT);
+    focusT=setTimeout(()=>{ if(sayBusy||sayQ.length||!focusOn) return; focusOn=false; Native.unfocus(); },800);
+  }
   function sayDone(gen){
     if(gen!==sayGen) return;            // 已被插隊中斷的舊句子，不要推進佇列
     sayBusy=false; sayUtter=null; clearTimeout(sayWatch);
     setTimeout(sayPump,120);
+    if(!sayQ.length) focusRelease();
   }
   function sayCancel(){
     sayGen++; sayBusy=false; sayUtter=null; clearTimeout(sayWatch);
@@ -1300,14 +1321,17 @@ const Audio_=(function(){
     if(sayBusy) return;
     const now=Date.now();
     while(sayQ.length&&now-sayQ[0].t>SAY_STALE) sayQ.shift();
-    const it=sayQ.shift(); if(!it) return;
+    const it=sayQ.shift(); if(!it){ focusRelease(); return; }
     sayBusy=true;
     const gen=++sayGen;
     // 保險：onend 沒有回來（部分 Android／iOS 會漏發）也不能讓佇列永遠卡住
     clearTimeout(sayWatch);
     sayWatch=setTimeout(()=>sayDone(gen),1500+it.txt.length*350);
     if(Native.hasTTS){
-      Native.speak(it.txt).then(()=>sayDone(gen),()=>sayDone(gen));
+      focusGrab().then(()=>{
+        if(gen!==sayGen) return;          // 等焦點的時候被插隊了
+        Native.speak(it.txt).then(()=>sayDone(gen),()=>sayDone(gen));
+      });
       return;
     }
     try{
@@ -1720,6 +1744,12 @@ const Native=(function(){
     get hasBgGeo(){ return has('BackgroundGeolocation'); },
     get hasTTS(){ return has('TextToSpeech'); },
     get hasBaro(){ return has('Baro'); },
+    get hasFocus(){ return has('AudioFocus'); },
+    /** 播報時讓其他 App（電台）暫停（mobile/plugins/audio）。iOS 在背景時會自動退回「降低音量」 */
+    focus(){
+      try{ return plugin('AudioFocus').request({mode:'mute'}).catch(()=>null); }catch(e){ return Promise.resolve(null); }
+    },
+    unfocus(){ try{ plugin('AudioFocus').release().catch(()=>{}); }catch(e){} },
     /** 氣壓高度變化（mobile/plugins/baro）。回傳 true = 這支手機有氣壓計而且開始量了 */
     async baroStart(onChange){
       if(!has('Baro')) return false;
@@ -2241,16 +2271,42 @@ function stopSim(){
 
 /* ---------- 12. 地圖 ---------- */
 let MAP=null,camLayer=null,meMarker=null,meCircle=null,pickMode=false;
+/* 底圖。預設國土測繪中心「通用版電子地圖」：官方門牌，放大到 19 級幾乎每戶都有。
+   該中心使用條款：免費（付費且需登入才看得到地圖的網站除外）、不得大量下載、
+   浮水印與來源不得遮蔽，而且中心可以隨時限流或停止服務 —— 所以一定要有 OSM 備援。
+   OSM 圖磚使用政策要求完整標示且不得藏在收合選單後面，少了 "contributors" 就不算合規。 */
+const TILES={
+  nlsc:{name:'國土測繪中心',url:'https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}',
+    attr:'© <a href="https://maps.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a> 通用版電子地圖'},
+  osm:{name:'OpenStreetMap',url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attr:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}};
+const BASE={layer:null,key:'',streak:0,ok:0,fellBack:false};
+const BASE_FAIL=8;                       // 國土測繪中心連續這麼多張載不到 → 這次改用 OSM
+function setBaseMap(key,auto){
+  if(!MAP) return;
+  if(!TILES[key]) key='nlsc';
+  if(BASE.layer&&BASE.key===key) return;
+  if(BASE.layer) MAP.removeLayer(BASE.layer);
+  const t=TILES[key];
+  BASE.key=key; BASE.streak=0; BASE.ok=0; BASE.fellBack=!!auto;
+  BASE.layer=L.tileLayer(t.url,{maxZoom:19,attribution:t.attr}).addTo(MAP);
+  BASE.layer.on('tileload',()=>{ BASE.streak=0; BASE.ok++; });
+  BASE.layer.on('tileerror',()=>{ BASE.streak++; baseCheck(); });
+  BASE.layer.bringToBack();
+}
+/* 只改這一次開 App 的底圖，不動設定：國土測繪中心恢復後，下次開 App 就回來。
+   沒網路時兩邊都載不到，換了也沒用，不換。 */
+function baseCheck(){
+  if(BASE.key!=='nlsc'||BASE.streak<BASE_FAIL) return;
+  if(navigator.onLine===false) return;
+  setBaseMap('osm',true);
+  toast('國土測繪中心地圖暫時載不到，已改用 OpenStreetMap',4000);
+}
 function initMap(){
   if(typeof L==='undefined'){ el('radarWrap').classList.remove('hidden'); el('map').style.display='none'; return; }
   try{
     MAP=L.map('map',{zoomControl:false,attributionControl:true}).setView([24.75,121.75],11);
-    // OSM 圖磚使用政策要求完整標示且不得隱藏在收合選單後面。
-    // 少了 "contributors" 就不算合規的標示。
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {maxZoom:19,
-       attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-      }).addTo(MAP);
+    setBaseMap(CFG.mapStyle);
     L.control.zoom({position:'bottomleft'}).addTo(MAP);
     camLayer=L.layerGroup().addTo(MAP);
     MAPROT.on = CFG.mapRotate!==false;
@@ -2342,18 +2398,30 @@ function paintCone(heading){
 
 /* ── 車頭向前：把地圖容器整個轉 -heading ── */
 const MAPROT={on:false,deg:0,last:0};
+/* 旋轉時地圖要蓋滿畫面：邊長要大於等於畫面對角線，轉到任何角度四個角都不會露白。
+   以前固定 160%，直式手機轉到斜角（例如往東北開）右上、左下會露出白色三角形。
+   地圖分頁沒顯示時量到 0，不要動，切回來再量。 */
+function sizeRot(){
+  const w=el('mapRot'), m=el('map'); if(!w||!m) return;
+  if(!w.classList.contains('rot')){ m.style.width=m.style.height=m.style.left=m.style.top=''; return; }
+  const W=w.clientWidth, H=w.clientHeight;
+  if(!W||!H) return;
+  const D=Math.ceil(Math.hypot(W,H))+2;
+  m.style.width=m.style.height=D+'px';
+  m.style.left=Math.floor((W-D)/2)+'px'; m.style.top=Math.floor((H-D)/2)+'px';
+}
 function setMapRotation(heading){
   const wrap=el('mapRot'); if(!wrap) return;
   if(!MAPROT.on||heading==null||isNaN(heading)){
     if(MAPROT.deg!==0){ MAPROT.deg=0; el('map').style.transform=''; }
     if(wrap.classList.contains('rot')){
-      wrap.classList.remove('rot');
+      wrap.classList.remove('rot'); sizeRot();
       if(MAP) setTimeout(()=>{ try{ MAP.invalidateSize({animate:false}); }catch(e){} },0);
     }
     return;
   }
   if(!wrap.classList.contains('rot')){
-    wrap.classList.add('rot');
+    wrap.classList.add('rot'); sizeRot();
     // 容器尺寸從 100% 變成 160%，不讓 Leaflet 重新量的話它會沿用舊尺寸
     if(MAP) setTimeout(()=>{ try{ MAP.invalidateSize({animate:false}); }catch(e){} },0);
   }
@@ -4969,7 +5037,7 @@ function bind(){
     document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
     closeFabMenu();
     b.classList.add('active'); el('v-'+b.dataset.v).classList.add('active');
-    if(b.dataset.v==='map'&&MAP) setTimeout(()=>MAP.invalidateSize(),80);
+    if(b.dataset.v==='map'&&MAP) setTimeout(()=>{ sizeRot(); MAP.invalidateSize(); },80);
     if(b.dataset.v==='traffic') renderTraffic();
     if(b.dataset.v==='report'){ renderKm(); renderHazKinds(); renderHazards(); }
     if(b.dataset.v==='trip') renderTrip();
@@ -4997,6 +5065,9 @@ function bind(){
     if(!MAPROT.on) setMapRotation(null);
     else if(GPS.last) setMapRotation(GPS.last.headingOk===false?null:GPS.last.heading);
     if(GPS.last) paintCone(GPS.last.headingOk===false?null:GPS.last.heading); });
+  const mst=el('mapStyle');
+  if(mst){ mst.value=TILES[CFG.mapStyle]?CFG.mapStyle:'nlsc';
+    mst.onchange=()=>{ CFG.mapStyle=mst.value; saveCfg(); setBaseMap(CFG.mapStyle); }; }
   const kps=el('kmPopSec');
   if(kps){ kps.value=String(CFG.kmPopSec==null?10:CFG.kmPopSec);
     kps.onchange=()=>{ CFG.kmPopSec=parseInt(kps.value,10)||0; saveCfg();
@@ -5489,8 +5560,12 @@ function boot(){
   // 匿名使用統計心跳（只進後台）
   setTimeout(pingOnline,3000);
   setInterval(pingOnline,60e3);
+  // iOS 的語音外掛一啟動就把其他 App 壓低音量而且不放，等它設定完再放掉
+  if(Native.hasFocus) setTimeout(()=>Native.unfocus(),2000);
   // 車隊（跟車）
   convoyBoot();
+  // 轉手機橫直、視窗大小改變：旋轉中的地圖要重新量
+  window.addEventListener('resize',()=>{ if(el('mapRot').classList.contains('rot')){ sizeRot(); if(MAP) MAP.invalidateSize({animate:false}); } });
   radioBoot();
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pingOnline(); });
   // 對外測試介面
@@ -5514,6 +5589,7 @@ function boot(){
              retractHazard,probeTick,sendProbe,cruiseSpeed,cruiseSample,PROBE,
              renderHazards,saveHazards,scoreBadge,
              countyOf,coverage,renderCoverage,COUNTIES,
+             TILES,BASE,setBaseMap,BASE_FAIL,sizeRot,
              MAPROT,setMapRotation,screenToLatLng,showKmPop,hideKmPop,paintCone,updateMapPos,
              MAP:()=>MAP,
              openRadio,renderRadio,radioPbsOrder,RADIO_TAB:()=>RADIO_TAB,
