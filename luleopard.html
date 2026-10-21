@@ -223,6 +223,7 @@ textarea{resize:vertical;min-height:74px}
 #rdBtn{top:62px}
 #wxBtn{top:112px}
 #wxBtn.alert{background:#3a2a0c;border-color:var(--warn);color:#ffe6a8}
+#wxBtnTx{max-width:4.5em;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 /* ---------- 電台 ---------- */
 .rdtabs{display:flex;gap:6px;background:var(--panel2);border-radius:12px;padding:4px;margin-bottom:10px}
 .rdtabs button{flex:1;min-height:42px;border-radius:9px;font-size:15px;font-weight:700;color:var(--dim)}
@@ -293,6 +294,14 @@ textarea{resize:vertical;min-height:74px}
   box-shadow:0 3px 10px rgba(0,0,0,.7)}
 .cvpin.lead{width:40px;height:40px;font-size:20px;box-shadow:0 0 0 4px rgba(201,162,39,.35),0 3px 10px rgba(0,0,0,.7)}
 .cvpin.stale{filter:grayscale(1);opacity:.55}
+.cvwrap{display:flex;flex-direction:column;align-items:center;transition:transform .25s}
+.cvnick{margin-top:2px;max-width:90px;padding:1px 6px;border-radius:8px;background:rgba(10,14,19,.85);color:#fff;
+  font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cvdot{display:none;position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;
+  background:var(--c);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.cvmoved .cvdot{display:block}
+.cvnickin{width:100%;box-sizing:border-box;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  color:var(--txt);font-size:16px;padding:10px 12px}
 .cvtrail{stroke-dasharray:12 8;animation:cvflow .9s linear infinite}
 @keyframes cvflow{to{stroke-dashoffset:-20}}
 
@@ -834,11 +843,13 @@ textarea{resize:vertical;min-height:74px}
 <div id="cvSheet" class="cvsheet hidden"><div class="cvbox">
   <div class="cvhd"><b>🚗 車隊跟車</b><i id="cvX">×</i></div>
   <div id="cvJoin">
-    <label class="cvl" for="cvCode">車隊代碼（同一團的車輸入同一組）</label>
-    <div class="cvrow"><input id="cvCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="K7P2QX">
+    <label class="cvl" for="cvCode">車隊代碼（6 位數字，同一團的車輸入同一組）</label>
+    <div class="cvrow"><input id="cvCode" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="off" spellcheck="false" placeholder="582047">
       <button id="cvNew" class="btn">建立新車隊</button></div>
     <label class="cvl">我的車號</label>
     <div id="cvLabels" class="cvlabels"></div>
+    <label class="cvl" for="cvNick">暱稱或車牌（選填，最多 8 個字，會顯示在大家的地圖上）</label>
+    <input id="cvNick" class="cvnickin" maxlength="8" autocomplete="off" spellcheck="false" placeholder="例如：阿明、ABC-1234">
     <div class="cvnote">A 是頭車：大家的地圖上會畫出頭車最近約 1 分鐘（1 公里內）的行駛軌跡。<br>
       位置只分享給同一組代碼的車，<b>8 小時後自動解除</b>。</div>
     <div id="cvErr" class="cverr"></div>
@@ -1381,6 +1392,8 @@ const Audio_=(function(){
     },
     beep(freq,dur,vol){
       if(!CFG.beep||!ctx) return;
+      // 嗶聲也要先請電台暫停（實地回報：警示時 FM 沒停 —— 以前只有語音會要焦點）；沒接著唸就 0.8 秒後還回去
+      if(Native.hasFocus){ focusGrab(); focusRelease(); }
       try{ const o=ctx.createOscillator(), g=ctx.createGain();
         o.type='square'; o.frequency.value=freq; g.gain.value=vol||.09;
         o.connect(g); g.connect(ctx.destination); o.start();
@@ -2483,18 +2496,30 @@ function screenToLatLng(clientX,clientY){
 
 function updateMapPos(p){
   if(!MAP) return;
+  const first=!meMarker;
   if(!meMarker){
     meMarker=L.marker([p.lat,p.lon],{icon:meIcon(),interactive:false,keyboard:false}).addTo(MAP);
     meCircle=L.circle([p.lat,p.lon],{radius:p.acc||20,color:'#1e88ff',weight:1,fillOpacity:.07}).addTo(MAP);
     MAP.setView([p.lat,p.lon],15);
   } else {
     meMarker.setLatLng([p.lat,p.lon]); meCircle.setLatLng([p.lat,p.lon]).setRadius(p.acc||20);
-    if(followMe) MAP.panTo([p.lat,p.lon],{animate:true,duration:.4});
   }
   // 航向不可信時不要亂轉 —— 轉錯方向比不轉更容易讓人迷失
   const hd=(p.headingOk===false)?null:p.heading;
   setMapRotation(hd);
   paintCone(hd);
+  if(followMe&&!first) MAP.panTo(followCenter(p),{animate:true,duration:.4});
+}
+/** 車頭向前時，自己的車放在畫面下方約三分之一，前方多看一點路（實地回報：交流道被左上角按鈕擋住）。
+ *  北朝上時前方不一定是畫面上方，維持置中。 */
+const FOLLOW_LOW=1/6;     // 從畫面中心往下移畫面高度的 1/6 → 車在下方三分之一
+function followCenter(p){
+  const w=el('mapRot');
+  if(!MAP||!w||!w.classList.contains('rot')) return [p.lat,p.lon];
+  const D=w.clientHeight*FOLLOW_LOW; if(!D) return [p.lat,p.lon];
+  // 螢幕上的「往上 D」換回未旋轉的容器座標（與 screenToLatLng 同一套換算）
+  const th=-MAPROT.deg*Math.PI/180, c=MAP.latLngToContainerPoint([p.lat,p.lon]);
+  return MAP.containerPointToLatLng([c.x+D*Math.sin(th), c.y-D*Math.cos(th)]);
 }
 let followMe=true;
 
@@ -3484,11 +3509,15 @@ function pingOnline(){
    每 5 秒跟後端交換一次位置（停車省電時 15 秒）；8 小時自動解除，解除前倒數 10 秒讓人選要不要繼續。 */
 const CV_HOURS=8, CV_WARN_S=10, CV_SEND_MS=5000, CV_IDLE_MS=15000, CV_STALE_S=60;
 const CV_TRAIL_MS=60e3, CV_TRAIL_M=1000;
-const CV_LABELS='ABCDEFGH', CV_ABC='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 代碼不用 I O 0 1，免得看錯
+const CV_LABELS='ABCDEFGH', CV_ABC='0123456789';   // 代碼只用數字：用講的、用打的都不會搞錯（實地回報）
+const CV_NICK_MAX=8;
 const CV_COLOR={A:'#c9a227',B:'#4aa8ff',C:'#2fd07a',D:'#ff8a3d',E:'#c77dff',F:'#ff5fa2',G:'#3dd6d0',H:'#cfd8e3'};
-const CONVOY=Object.assign({code:'',label:'',until:0},Store.get(K('convoy'),{}),
+const CONVOY=Object.assign({code:'',label:'',until:0,nick:''},Store.get(K('convoy'),{}),
   {members:[],okAt:0,lastSend:0,busy:false,err:'',trail:[],prompt:false,pick:'',taken:[],known:null});
-const cvSave=()=>Store.set(K('convoy'),{code:CONVOY.code,label:CONVOY.label,until:CONVOY.until});
+const cvSave=()=>Store.set(K('convoy'),{code:CONVOY.code,label:CONVOY.label,until:CONVOY.until,nick:CONVOY.nick});
+const cvNickClean=v=>String(v||'').replace(/[\u0000-\u001f<>]/g,'').replace(/\s+/g,' ').trim().slice(0,CV_NICK_MAX);
+/** 「A 小明」／沒有暱稱就「A 車」 */
+const cvName=m=>m.label+(m.nick?' '+m.nick:' 車');
 const cvBase=()=>(CFG.hazUrl||'').replace(/\/+$/,'');
 const cvCodeOk=c=>/^[A-Z0-9]{6}$/.test(c||'');
 function cvNewCode(){
@@ -3529,6 +3558,7 @@ async function convoySend(force){
   if(!force&&now-C.lastSend<iv) return 0;
   C.busy=true; C.lastSend=now;
   const code=C.code, p=GPS.last, body={device:deviceId(),label:C.label};
+  if(C.nick) body.nick=C.nick;
   if(p&&now-p.t<30e3){
     body.lat=+p.lat.toFixed(6); body.lon=+p.lon.toFixed(6); body.acc=p.acc||null;
     body.hd=(p.headingOk!==false&&p.heading!=null&&!isNaN(p.heading))?Math.round((p.heading+360)%360):null;
@@ -3557,7 +3587,7 @@ function cvNotice(){
   const C=CONVOY;
   const now=new Set(C.members.filter(m=>!m.me&&cvAge(m)<180).map(m=>m.label));
   if(C.known){
-    now.forEach(l=>{ if(!C.known.has(l)) toast(l+' 車加入車隊'); });
+    now.forEach(l=>{ if(!C.known.has(l)){ const m=C.members.find(x=>x.label===l&&!x.me); toast((m?cvName(m):l+' 車')+' 加入車隊'); } });
     C.known.forEach(l=>{ if(!now.has(l)) toast(l+' 車已離開或斷線'); });
   }
   C.known=now;
@@ -3567,19 +3597,20 @@ function cvReset(){
   C.code=''; C.label=''; C.until=0; C.members=[]; C.okAt=0; C.err=''; C.known=null; C.prompt=false;
   cvSave(); el('cvPrompt').classList.add('hidden'); drawConvoy(); paintConvoy();
 }
-async function convoyJoin(code,label){
+async function convoyJoin(code,label,nick){
   const C=CONVOY;
   code=String(code||'').toUpperCase().trim();
-  if(!cvCodeOk(code)){ C.err='代碼是 6 碼英文或數字'; paintSheet(); return false; }
+  if(!cvCodeOk(code)){ C.err='代碼是 6 位數字'; paintSheet(); return false; }
   if(!CV_LABELS.includes(label||'')||label.length!==1){ C.err='請選一個車號'; paintSheet(); return false; }
   if(!cvBase()){ C.err='沒有設定共享伺服器（設定 → 路況共享）'; paintSheet(); return false; }
   if(C.code&&C.code!==code) convoyLeave(true);
   C.code=code; C.label=label; C.until=Date.now()+CV_HOURS*3600e3; C.err=''; C.known=null;
+  if(nick!==undefined){ C.nick=cvNickClean(nick); Store.set(K('cvNick'),C.nick); }
   Store.set(K('cvLabel'),label);
   const st=await convoySend(true);
   if(C.code!==code) return false;                      // 409：已經退出並重開面板
   cvSave(); closeConvoy();
-  toast(st===200?'已加入車隊 '+code+'，你是 '+label+' 車':'已加入車隊 '+code+'（'+(C.err||'連線中')+'）',3500);
+  toast(st===200?'已加入車隊 '+code+'，你是 '+cvName(C):'已加入車隊 '+code+'（'+(C.err||'連線中')+'）',3500);
   return true;
 }
 function convoyLeave(silent,why){
@@ -3618,23 +3649,24 @@ function cvIcon(m,stale){
   const lead=m.label==='A';
   const sz=lead?40:34;
   return L.divIcon({className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2],
-    html:`<div class="cvpin${lead?' lead':''}${stale?' stale':''}" style="--c:${CV_COLOR[m.label]}">${m.label}</div>`});
+    html:`<div class="cvwrap" style="transform-origin:50% ${sz/2}px"><div class="cvpin${lead?' lead':''}${stale?' stale':''}" style="--c:${CV_COLOR[m.label]}">${m.label}</div>`+
+      (m.nick?`<span class="cvnick">${esc(m.nick)}</span>`:'')+`</div><i class="cvdot" style="--c:${CV_COLOR[m.label]}"></i>`});
 }
 function cvPopup(label){
   const m=CONVOY.members.find(x=>x.label===label&&!x.me); if(!m) return '';
   const a=Math.round(cvAge(m)), me=GPS.last;
-  return `<b>${label} 車${label==='A'?'（頭車）':''}</b><br>`+
+  return `<b>${esc(cvName(m))}${label==='A'?'（頭車）':''}</b><br>`+
     (me&&m.lat!=null?'距離 '+fmtKm(dist(me.lat,me.lon,m.lat,m.lon))+'<br>':'')+
     (m.spd!=null?Math.round(m.spd*3.6)+' km/h · ':'')+(a<5?'剛剛':a+' 秒前');
 }
 function drawConvoy(){
   if(!MAP||typeof L==='undefined') return;
-  if(!cvLayer){ cvLayer=L.layerGroup().addTo(MAP); cvTrailLayer=L.layerGroup().addTo(MAP); }
+  if(!cvLayer){ cvLayer=L.layerGroup().addTo(MAP); cvTrailLayer=L.layerGroup().addTo(MAP); MAP.on('zoomend',cvSpread); }
   const C=CONVOY, seen=new Set();
   if(C.code) C.members.forEach(m=>{
     if(m.me||m.lat==null) return;
     seen.add(m.label);
-    const stale=cvAge(m)>CV_STALE_S, key=m.label+(stale?'s':'');
+    const stale=cvAge(m)>CV_STALE_S, key=m.label+(stale?'s':'')+'|'+(m.nick||'');
     let k=cvMarks[m.label];
     if(!k){
       k=cvMarks[m.label]={mk:L.marker([m.lat,m.lon],{icon:cvIcon(m,stale),zIndexOffset:m.label==='A'?900:800,keyboard:false})
@@ -3643,12 +3675,43 @@ function drawConvoy(){
       k.mk.setLatLng([m.lat,m.lon]);
       if(k.key!==key){ k.mk.setIcon(cvIcon(m,stale)); k.key=key; }
     }
-    // 地圖轉成車頭向前時，字母要轉回來保持正立
-    const e=k.mk.getElement&&k.mk.getElement(), pin=e&&e.firstChild;
-    if(pin) pin.style.transform=MAPROT.deg?'rotate('+(-MAPROT.deg)+'deg)':'';
   });
   Object.keys(cvMarks).forEach(l=>{ if(!seen.has(l)){ cvLayer.removeLayer(cvMarks[l].mk); delete cvMarks[l]; } });
+  cvSpread();
   drawCvTrail();
+}
+/* 靠得很近（塞車、休息站、併排）時圖示會疊成一團看不到：
+   螢幕上距離小於 CV_NEAR_PX 的車排成一圈散開，原本的位置留一個小點。
+   自己的車在其中時，自己留在中間不動。縮放、移動後重算。 */
+const CV_NEAR_PX=40;
+function cvSpread(){
+  if(!MAP||typeof L==='undefined') return;
+  const ls=Object.keys(cvMarks); if(!ls.length) return;
+  const pts=ls.map(l=>{ const c=MAP.latLngToContainerPoint(cvMarks[l].mk.getLatLng()); return {l,x:c.x,y:c.y,dx:0,dy:0}; });
+  const me=meMarker?MAP.latLngToContainerPoint(meMarker.getLatLng()):null;
+  // 分群：彼此在 CV_NEAR_PX 內的連成一群
+  const grp=pts.map((_,i)=>i), root=i=>grp[i]===i?i:(grp[i]=root(grp[i]));
+  for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++)
+    if(Math.hypot(pts[i].x-pts[j].x,pts[i].y-pts[j].y)<CV_NEAR_PX) grp[root(i)]=root(j);
+  const groups={};
+  pts.forEach((p,i)=>{ (groups[root(i)]=groups[root(i)]||[]).push(p); });
+  Object.values(groups).forEach(g=>{
+    const nearMe=me&&g.some(p=>Math.hypot(p.x-me.x,p.y-me.y)<CV_NEAR_PX);
+    if(g.length<2&&!nearMe) return;
+    g.sort((a,b)=>a.l.localeCompare(b.l));
+    const cx=nearMe?me.x:g.reduce((a,p)=>a+p.x,0)/g.length, cy=nearMe?me.y:g.reduce((a,p)=>a+p.y,0)/g.length;
+    const n=g.length, R=Math.max(nearMe?58:26,24/Math.sin(Math.PI/Math.max(n,2)));
+    // 螢幕正上方開始排：角度要扣掉地圖的旋轉
+    const a0=-Math.PI/2-MAPROT.deg*Math.PI/180;
+    g.forEach((p,i)=>{ const a=a0+2*Math.PI*i/n; p.dx=cx+R*Math.cos(a)-p.x; p.dy=cy+R*Math.sin(a)-p.y; });
+  });
+  pts.forEach(p=>{
+    const e=cvMarks[p.l].mk.getElement&&cvMarks[p.l].mk.getElement(); if(!e) return;
+    const w=e.firstChild, moved=Math.abs(p.dx)>1||Math.abs(p.dy)>1;
+    // 地圖轉成車頭向前時，字母要轉回來保持正立
+    if(w) w.style.transform=(moved?'translate('+p.dx.toFixed(1)+'px,'+p.dy.toFixed(1)+'px) ':'')+(MAPROT.deg?'rotate('+(-MAPROT.deg)+'deg)':'');
+    e.classList.toggle('cvmoved',moved);
+  });
 }
 /** 頭車軌跡：舊的淡、新的濃，虛線往車頭方向流動 */
 function drawCvTrail(){
@@ -3701,13 +3764,13 @@ function paintSheet(){
   el('cvCodeTx').textContent=C.code;
   el('cvErr2').textContent=C.err;
   const left=Math.max(0,C.until-Date.now());
-  el('cvLeft').textContent='你是 '+C.label+' 車 · '+Math.floor(left/3600e3)+' 小時 '+Math.floor(left%3600e3/60e3)+' 分後自動解除';
+  el('cvLeft').textContent='你是 '+cvName(C)+' · '+Math.floor(left/3600e3)+' 小時 '+Math.floor(left%3600e3/60e3)+' 分後自動解除';
   const me=GPS.last;
   el('cvList').innerHTML=C.members.map(m=>{
     const a=Math.round(cvAge(m)), stale=a>CV_STALE_S;
     const d=(!m.me&&me&&m.lat!=null)?fmtKm(dist(me.lat,me.lon,m.lat,m.lon)):'';
     return `<div class="${stale?'stale':''}"><i style="--c:${CV_COLOR[m.label]}">${m.label}</i>`+
-      `<em>${m.me?'我':m.label==='A'?'頭車':m.label+' 車'}</em>`+
+      `<em>${m.me?'我'+(m.nick?'（'+esc(m.nick)+'）':''):esc(m.nick||(m.label==='A'?'頭車':m.label+' 車'))+(m.nick&&m.label==='A'?'（頭車）':'')}</em>`+
       `<span>${m.lat==null?'等待定位':[d,m.spd!=null?Math.round(m.spd*3.6)+' km/h':''].filter(Boolean).join(' · ')}</span>`+
       `<small>${m.me?'':stale?'訊號中斷':a<5?'剛剛':a+' 秒前'}</small></div>`;
   }).join('')||'<div><span>連線中…</span></div>';
@@ -3754,18 +3817,19 @@ function convoyBoot(){
   el('cvSheet').onclick=e=>{ if(e.target.id==='cvSheet') closeConvoy(); };
   el('cvNew').onclick=()=>{ const c=cvNewCode(); el('cvCode').value=c; C.taken=[]; C.pick='A'; C.err=''; paintSheet(); };
   el('cvCode').oninput=e=>{
-    const v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);
+    const v=e.target.value.replace(/\D/g,'').slice(0,6);
     if(v!==e.target.value) e.target.value=v;
     C.err=''; el('cvErr').textContent='';
     if(v.length===6) cvLoadTaken(v); else { C.taken=[]; paintLabels(); }
   };
   el('cvLabels').onclick=e=>{ const b=e.target.closest('button'); if(!b||b.disabled) return; C.pick=b.dataset.l; paintLabels(); };
-  el('cvGo').onclick=()=>convoyJoin(el('cvCode').value,C.pick);
+  el('cvGo').onclick=()=>convoyJoin(el('cvCode').value,C.pick,el('cvNick').value);
+  el('cvNick').value=C.nick||Store.get(K('cvNick'),'');
   el('cvShare').onclick=cvShare;
   el('cvLeave').onclick=()=>convoyLeave(false);
   el('cvKeep').onclick=convoyExtend;
   el('cvEnd').onclick=()=>convoyLeave(false,'車隊已解除');
-  // 邀請連結 …#convoy=K7P2QX：打開就帶入代碼
+  // 邀請連結 …#convoy=582047：打開就帶入代碼
   const m=/[#&?]convoy=([A-Za-z0-9]{6})/.exec(location.hash+location.search);
   if(m){
     try{ history.replaceState(null,'',location.pathname+location.search.replace(/[?&]convoy=[^&]*/,'')); }catch(e){}
@@ -3782,7 +3846,8 @@ function convoyBoot(){
    後端每 10 分鐘抓中央氣象署：所在縣市的特報（大雨、豪雨、濃霧、強風…）＋附近雨量站。
    開車時每 10 分鐘問一次；進到有特報的縣市唸一次，附近雨勢很大也唸（30 分鐘內不重複，變更大才再唸）。
    官方沒有「哪個路段積水／起霧」的資料，所以面板下方給三顆一鍵回報，走跟掉落物一樣的回報機制。 */
-const WX={data:null,at:0,busy:false,err:'',rainLv:0,rainAt:0};
+const WX={data:null,at:0,busy:false,err:'',rainLv:0,rainAt:0,lat:null,lon:null};
+const WX_MOVE_M=5000;   // 開了 5 公里就重抓：跨縣市後特報要跟著換掉，不能等 10 分鐘
 const WX_EVERY=10*60e3, WX_SPEAK=/雨|霧|風|颱/;      // 低溫、高溫特報跟開車關係不大，不唸
 const wxSaid=new Map(Object.entries(Store.get(K('wxSaid'),{})));
 function wxRainLevel(r){ if(!r) return 0;
@@ -3791,8 +3856,9 @@ function wxRainLevel(r){ if(!r) return 0;
 async function pullWeather(p,force){
   const base=(CFG.hazUrl||'').replace(/\/+$/,'');
   if(!base||!p||WX.busy) return;
-  if(!force&&Date.now()-WX.at<WX_EVERY) return;
-  WX.busy=true; WX.at=Date.now();
+  const moved=WX.lat!=null&&dist(WX.lat,WX.lon,p.lat,p.lon)>=WX_MOVE_M;
+  if(!force&&!moved&&Date.now()-WX.at<WX_EVERY) return;
+  WX.busy=true; WX.at=Date.now(); WX.lat=p.lat; WX.lon=p.lon;
   try{
     const r=await fetch(base+'/weather?lat='+p.lat.toFixed(4)+'&lon='+p.lon.toFixed(4));
     const j=await r.json();
@@ -3824,12 +3890,16 @@ function wxAnnounce(j){
   }
   WX.rainLv=lv;
 }
+/** 目前這個位置、還沒結束的特報（伺服器每 10 分鐘才清一次過期的） */
+const wxActive=j=>j?(j.alerts||[]).filter(a=>WX_SPEAK.test(a.phenomena)&&!(a.end&&new Date(a.end).getTime()<Date.now())):[];
+const wxShort=ph=>String(ph||'').replace(/^(陸上|海上)/,'').replace(/特報$/,'').slice(0,4);
 const wxHm=t=>t?new Date(t).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false}):'';
 function paintWx(){
   const j=WX.data, b=el('wxBtn');
-  const al=j&&(j.alerts||[]).filter(a=>WX_SPEAK.test(a.phenomena));
-  b.classList.toggle('alert',!!(al&&al.length));
-  el('wxBtnTx').textContent= al&&al.length? al[0].phenomena+(al.length>1?'…':'')+'特報' : '天氣';
+  const al=wxActive(j);
+  b.classList.toggle('alert',!!al.length);
+  // 按鈕只放短字（「陸上強風」→「強風」），長的名稱會擋到地圖上的交流道
+  el('wxBtnTx').textContent= al.length? wxShort(al[0].phenomena)+(al.length>1?'…':'') : '天氣';
   if(el('wxSheet').classList.contains('hidden')) return;
   let h='';
   if(!GPS.last) h='等待定位…';

@@ -467,6 +467,10 @@ console.log('\n── 車隊（跟車） ──');
   t('別人看得到頭車與軌跡', am && !am.me && am.lat === A.lat && am.trail && am.trail.length === tr.length, am);
   const dup = await pos('dcar0003', 'A');
   t('車號重複回 409 並列出已用車號', dup.status === 409 && dup.body.taken.join('') === 'AB', dup.body);
+  const nk = await pos('dcar0002', 'B', { nick: '  阿明<b>\n的車子很長很長  ' });
+  const nb = nk.body.members.find(m => m.label === 'B');
+  t('暱稱：最多 8 字、去掉角括號與換行', nb && nb.nick === '阿明b 的車子很', nb && nb.nick);
+  t('沒填暱稱就沒有 nick 欄位', !('nick' in nk.body.members.find(m => m.label === 'A')));
   const bt = await pos('dcar0002', 'B', { trail });
   t('非頭車不存軌跡', bt.status === 200 && !bt.body.members.find(m => m.label === 'B').trail);
   const raw = (await env.DB.prepare('SELECT dev FROM convoy').all()).results;
@@ -474,6 +478,7 @@ console.log('\n── 車隊（跟車） ──');
   const g = await call('GET', C);
   t('GET 看得到成員、沒有 me', g.status === 200 && g.body.members.length === 2 && g.body.members.every(m => m.me === false), g.body);
   t('別的車隊看不到', (await call('GET', '/convoy/ZZZZZZ')).body.members.length === 0);
+  t('數字代碼也可以', (await call('POST', '/convoy/582047', { device: 'dnum0001', label: 'A' })).status === 200);
   // 頭車離開後，A 可以給別人
   t('離開', (await call('POST', C + '/leave', { device: 'dcar0001' })).status === 200);
   t('離開後車號釋出', (await pos('dcar0003', 'A')).status === 200);

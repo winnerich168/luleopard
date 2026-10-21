@@ -46,13 +46,28 @@ const API = 'https://wx.test';
   ok(wxCalls >= 1, '定位後沒去問天氣');
   ok(S.some(t => /臺中市發布大雨特報/.test(t)), '大雨特報沒唸：' + S);
   ok(!S.some(t => /低溫/.test(t)), '低溫特報不該唸：' + S);
-  ok(/大雨特報/.test(await A.textContent('#wxBtnTx')), '天氣按鈕沒顯示特報：' + await A.textContent('#wxBtnTx'));
+  ok(await A.textContent('#wxBtnTx') === '大雨', '天氣按鈕要只顯示短字「大雨」：' + await A.textContent('#wxBtnTx'));
   ok(await A.evaluate(() => document.getElementById('wxBtn').classList.contains('alert')), '天氣按鈕沒變警示色');
   // 同一則再抓一次不重唸
   await A.evaluate(() => { window.__said = []; }); await fix(A, true);
   ok(!(await said(A)).some(t => /特報/.test(t)), '同一則特報唸了兩次');
   // 10 分鐘內不重抓
   const c0 = wxCalls; await fix(A); ok(wxCalls === c0, '10 分鐘內又去抓天氣');
+  // 開了 5 公里以上：不等 10 分鐘就重抓；新位置沒有特報，按鈕要恢復成「天氣」
+  WXRES = res([], []);
+  const c1 = wxCalls;
+  await A.evaluate(async () => { LP.onPos(24.15 + 6000 / 111320, 120.675, 0, 10, 5, false); await new Promise(r => setTimeout(r, 400)); });
+  ok(wxCalls === c1 + 1, '開了 6 公里沒重抓天氣');
+  ok(await A.textContent('#wxBtnTx') === '天氣' && !(await A.evaluate(() => document.getElementById('wxBtn').classList.contains('alert'))),
+    '離開特報的縣市，按鈕還掛著特報：' + await A.textContent('#wxBtnTx'));
+  // 「陸上強風特報」只顯示「強風」；已經結束的特報不顯示
+  WXRES = res([{ phenomena: '陸上強風', significance: '特報', county: '新竹縣', end: now + 3600e3 }], []);
+  await fix(A, true);
+  ok(await A.textContent('#wxBtnTx') === '強風', '陸上強風沒縮成「強風」：' + await A.textContent('#wxBtnTx'));
+  WXRES = res([{ phenomena: '陸上強風', significance: '特報', county: '新竹縣', end: now - 60e3 }], []);
+  await fix(A, true);
+  ok(await A.textContent('#wxBtnTx') === '天氣', '已經結束的特報還掛在按鈕上');
+  WXRES = res([rainA, coldA], []);
   // 重開 App：不重唸
   await A.close(); A = await open(); await fix(A); await A.waitForTimeout(400);
   ok(!(await said(A)).some(t => /特報/.test(t)), '重開 App 又唸同一則特報');

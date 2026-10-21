@@ -240,7 +240,8 @@ async function handlePing(env, req) {
 /**
  * 車隊（跟車）。同一個代碼的車互相看得到位置，沒有帳號、不用建立房間：
  * 第一台車送出位置時車隊就存在了，最後一台離開（或 1 小時沒更新）就沒了。
- *   POST /convoy/:code        { device, label, lat?, lon?, hd?, spd?, acc?, trail? } → 回傳全隊位置
+ *   POST /convoy/:code        { device, label, nick?, lat?, lon?, hd?, spd?, acc?, trail? } → 回傳全隊位置
+ *                             nick：暱稱或車牌，最多 8 字，只給同隊的車看
  *   GET  /convoy/:code        只看誰在裡面（加入前挑車號用）
  *   POST /convoy/:code/leave  { device }
  * 車號 A～H，A 是頭車：只有頭車的軌跡（最近約 1 分鐘、最長 1 公里）會存下來給大家畫。
@@ -261,6 +262,7 @@ const convoyShape = (m, me, now) => ({
   label: m.label, me: m.dev === me, t: m.t, age: Math.round((now - m.t) / 1000),
   lat: m.lat == null ? null : m.lat, lon: m.lon == null ? null : m.lon,
   hd: m.hd == null ? null : m.hd, spd: m.spd == null ? null : m.spd,
+  ...(m.nick ? { nick: m.nick } : {}),
   ...(m.label === 'A' && m.trail ? { trail: m.trail } : {}),
 });
 const num = (v, lo, hi) => { const n = parseFloat(v); return isFinite(n) && n >= lo && n <= hi ? n : null; };
@@ -320,6 +322,8 @@ async function handleConvoy(env, req, code, action) {
   const d = (lat != null && lon != null)
     ? { lat, lon, hd: num(b.hd, 0, 360), spd: num(b.spd, 0, 120), acc: num(b.acc, 0, 100000) }
     : { lat: null, lon: null };                  // 還沒定位：先佔車號，位置之後補
+  const nick = clean(String(b.nick == null ? '' : b.nick).replace(/[<>]/g, ''), 8);
+  if (nick) d.nick = nick;
   if (label === 'A') { const tr = cleanTrail(b.trail, now); if (tr && tr.length) d.trail = tr; }
   await env.DB.prepare('INSERT OR REPLACE INTO convoy (code, dev, label, t, data) VALUES (?1, ?2, ?3, ?4, ?5)')
     .bind(code, dev, label, now, JSON.stringify(d)).run();

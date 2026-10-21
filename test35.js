@@ -69,6 +69,16 @@ const path = require('path'), fs = require('fs');
   L = await log(W);
   ok(L.join() === 'web:前方測速照相', '網頁版語音不對：' + L);
 
+  // 嗶聲也要讓電台暫停；嗶完接著唸，中間不還焦點，整串完才還一次
+  await A.evaluate(() => { window.__log.length = 0; LP.CFG.beep = true; LP.Audio_.unlock(); window.__log.length = 0;
+    LP.Audio_.beep(880, .12); setTimeout(() => LP.Audio_.say('前方測速'), 200); });
+  await A.waitForTimeout(2000);
+  L = await log(A);
+  ok(L.join() === 'request:mute,speak:前方測速,release', '嗶聲沒先請電台暫停，或嗶完到唸之間放掉了：' + L);
+  await A.evaluate(() => { window.__log.length = 0; LP.Audio_.beep(880, .12); });
+  await A.waitForTimeout(1300);
+  L = await log(A);
+  ok(L.join() === 'request:mute,release', '只有嗶聲時要暫停後再還回去：' + L);
   // 電台面板：網頁版要提醒「切去聽電台警示會停」，App 有背景定位不用
   await A.click('#rdBtn'); ok(await A.isHidden('#rdWebWarn'), 'App 版不該出現網頁版電台警告');
   await W.click('#rdBtn'); ok(await W.isVisible('#rdWebWarn'), '網頁版電台面板沒有「警示會停止」的提醒');

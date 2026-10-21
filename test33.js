@@ -52,7 +52,10 @@ const hav = (a, b, c, d) => Math.hypot((c - a) * 111320, (d - b) * 111320 * Math
   await A.evaluate(([la, lo]) => LP.onPos(la, lo, 0, 25, 5, false), P0);
   await A.click('#cvBtn'); await A.click('#cvNew');
   const code = await A.inputValue('#cvCode');
-  ok(/^[A-Z0-9]{6}$/.test(code), '建立新車隊沒產生 6 碼代碼：' + code);
+  ok(/^\d{6}$/.test(code), '建立新車隊沒產生 6 位數字代碼：' + code);
+  ok(await A.getAttribute('#cvCode', 'inputmode') === 'numeric', '代碼欄沒有叫出數字鍵盤');
+  await A.fill('#cvCode', '1a2b3'); ok(await A.inputValue('#cvCode') === '123', '代碼欄沒濾掉英文：' + await A.inputValue('#cvCode'));
+  await A.fill('#cvCode', code);
   ok(await A.isVisible('#cvLabels button.sel[data-l="A"]'), '建立車隊時預設不是 A（頭車）');
   await A.click('#cvGo'); await A.waitForTimeout(300);
   const ja = await A.evaluate(() => ({ code: LP.CONVOY.code, label: LP.CONVOY.label, left: LP.CONVOY.until - Date.now(), btn: document.getElementById('cvBtnTx').textContent }));
@@ -64,6 +67,7 @@ const hav = (a, b, c, d) => Math.hypot((c - a) * 111320, (d - b) * 111320 * Math
   // 頭車往北開 150 秒、每秒 25 公尺（3.75 公里）
   await A.evaluate(async ([la, lo]) => {
     for (let i = 1; i <= 150; i++) { window.__t += 1000; LP.onPos(la + i * 25 / 111320, lo, 0, 25, 5, false); }
+    window.__lastA = [la + 150 * 25 / 111320, lo];
     await LP.convoySend(true);
   }, P0);
 
@@ -77,6 +81,8 @@ const hav = (a, b, c, d) => Math.hypot((c - a) * 111320, (d - b) * 111320 * Math
   ok(await B.isVisible('#cvLabels button.sel[data-l="B"]'), 'A 被用走後沒自動改選 B');
   // 跟在頭車後面約 2 公里
   await B.evaluate(([la, lo]) => LP.onPos(la + 70 * 25 / 111320, lo, 0, 25, 5, false), P0);
+  await B.fill('#cvNick', '阿明 ABC-1234');
+  ok(await B.inputValue('#cvNick') === '阿明 ABC-1', '暱稱欄沒限制 8 個字：' + await B.inputValue('#cvNick'));
   await B.click('#cvGo'); await B.waitForTimeout(300);
   const jb = await B.evaluate(async () => { await LP.convoySend(true); LP.drawConvoy();
     const a = LP.CONVOY.members.find(m => m.label === 'A');
@@ -96,11 +102,31 @@ const hav = (a, b, c, d) => Math.hypot((c - a) * 111320, (d - b) * 111320 * Math
   const sa = await A.evaluate(async () => { window.__t += 6000; await LP.convoySend(true);
     return { n: LP.CONVOY.members.length, marks: Object.keys(LP.cvMarks), trails: document.querySelectorAll('path.cvtrail').length }; });
   ok(sa.n === 2 && sa.marks.join() === 'B', '頭車地圖上看不到 B：' + JSON.stringify(sa));
+  ok(await A.textContent('.cvnick') === '阿明 ABC-1', '頭車地圖上 B 沒顯示暱稱');
+  ok(!(await A.$('.cvmoved')), '兩台離很遠，卻被散開了');
   ok(sa.trails >= 3, '頭車自己的地圖沒有軌跡：' + sa.trails);
   await B.click('#cvBtn'); await B.waitForTimeout(100);
   const list = await B.textContent('#cvList');
   ok(/頭車/.test(list) && /km/.test(list), '車隊清單沒列出頭車距離：' + list);
   await B.click('#cvX');
+  await A.click('#cvBtn'); await A.waitForTimeout(100);
+  ok(/阿明 ABC-1/.test(await A.textContent('#cvList')), '頭車的車隊清單沒有 B 的暱稱');
+  await A.click('#cvX');
+
+  // ── 兩台靠在一起（塞車、休息站）：圖示要散開，原位置留一個小點 ──
+  const near = await A.evaluate(() => { const c = LP.MAP().getCenter(); const m = document.querySelector('.mecone'); return [window.__lastA[0], window.__lastA[1]]; });
+  await B.evaluate(async ([la, lo]) => { LP.onPos(la + 30 / 111320, lo, 0, 0, 5, false); await LP.convoySend(true); }, near);
+  const sp2 = await A.evaluate(async () => { LP.MAP().setZoom(15, { animate: false }); window.__t += 6000; await LP.convoySend(true);
+    await new Promise(r => setTimeout(r, 400));
+    const e = LP.cvMarks.B.mk.getElement(), w = e.firstChild, me = document.querySelector('.mecone').getBoundingClientRect(),
+      pin = e.querySelector('.cvpin').getBoundingClientRect();
+    return { moved: e.classList.contains('cvmoved'), dot: getComputedStyle(e.querySelector('.cvdot')).display, tf: w.style.transform,
+      gap: Math.hypot(pin.x + pin.width / 2 - (me.x + me.width / 2), pin.y + pin.height / 2 - (me.y + me.height / 2)) }; });
+  ok(sp2.moved && sp2.dot === 'block', '靠在一起時 B 沒散開：' + JSON.stringify(sp2));
+  ok(sp2.gap >= 36, '散開後 B 還是壓在自己的車上：' + JSON.stringify(sp2));
+  // 放大到分得開：回到原位
+  const sp3 = await A.evaluate(() => { LP.MAP().setZoom(18, { animate: false }); return new Promise(r => setTimeout(() => r(LP.cvMarks.B.mk.getElement().classList.contains('cvmoved')), 300)); });
+  ok(sp3 === false, '放大到分得開了，B 還是散開的位置');
 
   // ── 8 小時到期：倒數 10 秒 ──
   const e1 = await B.evaluate(() => { window.__t = LP.CONVOY.until - 9500; window.__said = []; LP.convoyTick();
