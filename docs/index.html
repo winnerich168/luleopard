@@ -782,10 +782,11 @@ textarea{resize:vertical;min-height:74px}
     </div>
     <div class="card">
       <h3>📏 警示距離 <small>依車速</small></h3>
-      <div class="row"><label>第一聲提醒距離</label><span>時速 × <b id="vAlertK">5</b> 公尺</span></div>
+      <div class="row"><label>提醒距離倍數</label><span><b id="vAlertK">5</b>（預設 5，越大越早）</span></div>
       <input type="range" id="rAlertK" min="3" max="12" step="0.5" style="width:100%">
       <div class="hint" id="alertKEx" style="margin-top:6px"></div>
-      <div class="hint" style="margin-top:6px">第二聲是第一聲的一半，最後一聲（就在前方）是時速 × 1.2 公尺。
+      <div class="hint" style="margin-top:6px">依到達前幾秒提醒：時速 50 以下第一聲約 18 秒前，時速 100 以上約 30 秒前，中間隨車速加長。
+        第二聲是第一聲的一半，最後一聲（就在前方）約 4～6 秒前。
         定位很久才更新一次或誤差大時，會自動再提早一些。</div>
     </div>
     <div class="card">
@@ -982,7 +983,7 @@ const APP_STAGE='公測版';
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
    「剛剛推的那版」—— 回報問題時看序號才知道你跑的是哪一次建置。
    這一行由 scripts/build-pages.mjs 在發佈時自動蓋掉，不要手改。 */
-const APP_BUILD='20261023.0633';
+const APP_BUILD='20261023.0719';
 
 /* 官方網站上的資料檔。GitHub Pages 允許跨網域讀取，打包成 App 也抓得到。
    speedcams.min.json 由 GitHub Actions 每週重抓各縣市開放資料；
@@ -1540,20 +1541,30 @@ const passNear=acc=>Math.max(60,Math.min(acc||0,100)+30);
 let lastAlertAt=0;
 
 /**
- * 三級警示距離：依車速。
- *   第一聲（預告）＝ 時速 × N 公尺（N 預設 5，也就是「車速的千分之五」公里）
- *                   時速 100 → 500 公尺、時速 50 → 250 公尺
- *   第二聲（注意）＝ 第一聲的一半
- *   第三聲（就在前方）＝ 時速 × 1.2 公尺（時速 100 → 120 公尺）
+ * 三級警示距離：用「到達前幾秒」算，車速越快提早越多秒。
+ *   時速 50 以下：第一聲 18 秒、第二聲 9 秒、就在前方 4.3 秒（市區維持原樣）
+ *   時速 100 以上：30 秒、15 秒、6 秒；50～100 之間線性過渡
+ *   時速 100 → 830／420／167 公尺；時速 50 → 250／125／60 公尺
+ * 設定的倍數 N（預設 5）整體放大縮小前兩聲：6 → 提早兩成。
  * 各級有下限，停等或龜速時不會短到來不及。
- * 實地回報：以前固定 600／300 公尺起跳、外加 1 公里遠距預告，市區慢慢開時太早報、
- * 轉角前也報；改成完全跟著車速走。
+ * 實地回報：以前固定 600／300 公尺起跳、外加 1 公里遠距預告，市區慢慢開時太早報；
+ * 改成固定 18 秒後，國道上又嫌匆促（聽完一句話、看速限、再減速） —— 高速要給更多秒數。
  */
 const TIER_MIN=[150,80,50];
+/** 到達前幾秒：[第一聲, 就在前方]，依時速在 50～100 之間線性過渡 */
+function tierSecs(kmh){
+  const f=Math.max(0,Math.min(1,(kmh-50)/50));
+  return [18+12*f, 4.32+1.68*f];
+}
+/** 不含定位補償的基本距離（設定頁的範例也用這個） */
+function tierBase(tier,kmh){
+  const v=kmh/3.6, k=(CFG.alertK||5)/5, [t1,t3]=tierSecs(kmh);
+  const d= tier===1? v*t1*k : tier===2? v*t1*k/2 : v*t3;
+  return Math.max(d,TIER_MIN[tier-1]);
+}
 function tierDist(tier,speedMps){
-  const v=speedMps||0, kmh=v*3.6, k=CFG.alertK||5;
-  let d= tier===1? kmh*k : tier===2? kmh*k/2 : kmh*1.2;
-  d=Math.max(d,TIER_MIN[tier-1]);
+  const v=speedMps||0;
+  let d=tierBase(tier,v*3.6);
   /* 定位更新間隔的補償。
      時速 100 每秒走 28 公尺：1 秒更新一次，三個級距都踩得到；
      但更新間隔拉到 20 秒就是一步 556 公尺 —— 比整個第一級警示窗還寬，
@@ -5288,7 +5299,7 @@ function bind(){
     r.oninput=()=>{ CFG[key]=+r.value; el(vid).textContent=r.value; saveCfg(); state.clear(); }; };
   rng('rSimSpd','vSimSpd','simSpd');
   const kEx=()=>{ const k=CFG.alertK||5;
-    el('alertKEx').textContent=[50,80,100,110].map(v=>'時速 '+v+' → '+Math.round(v*k)+' 公尺').join('　'); };
+    el('alertKEx').textContent='第一聲：'+[50,80,100,110].map(v=>'時速 '+v+' → '+Math.round(tierBase(1,v))+' 公尺').join('　'); };
   { const r=el('rAlertK'); r.value=CFG.alertK||5; el('vAlertK').textContent=CFG.alertK||5; kEx();
     r.oninput=()=>{ CFG.alertK=+r.value; el('vAlertK').textContent=r.value; kEx(); saveCfg(); state.clear(); }; }
   rng('rPowerMin','vPowerMin','powerAfterMin');
