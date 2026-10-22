@@ -62,6 +62,11 @@ const path = require('path');
   const north = s => [s, 0, 0];
 
   /* 1. 國道時速 100 往北：路線上有國道照相（速限 100）；旁邊 60 公尺、正下方各有平面道路照相（速限 50） */
+  // 紅框閃：每次加上 .on 就記一筆，記下當時唸到第幾句
+  await page.evaluate(() => { window.__flash = []; new MutationObserver(recs => {
+    if (recs.some(r => r.target.id === 'edgeFlash' && r.target.classList.contains('on') && !/\bon\b/.test(r.oldValue || '')))
+      window.__flash.push(window.__said.length);
+  }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true }); });
   R.國道 = await run('國道', 100, 3200, north, [
     { n: 2500, e: 0, lim: 100, dir: '南往北', name: '國道一號北向80公里' },
     { n: 1500, e: 60, lim: 50, name: '新竹縣竹北市 中華路與鳳岡路口' },
@@ -69,6 +74,7 @@ const path = require('path');
     { n: 2000, e: 0, lim: 50, name: '新竹縣竹北市 中華路1483巷口' },
     { n: 1200, e: -400, lim: 60, name: '新竹縣湖口鄉 八德路（平行道路 400 公尺外）' },
   ]);
+  R.紅框 = await page.evaluate(() => window.__flash.map(i => window.__said[i]));   // 閃的當下語音才剛排進去，對應的是下一句
   /* 2. 平面道路時速 50 往北：路線上速限 50 的照相要報；頭上國道照相（速限 100）不報 */
   R.平面 = await run('平面', 50, 1500, north, [
     { n: 1000, e: 0, lim: 50, name: '新竹縣竹北市 中華路與鳳岡路口' },
@@ -98,6 +104,10 @@ const path = require('path');
   ok('平面道路慢開：頭上國道照相不報', !R.平面.some(x => /速限100/.test(x.t)));
   ok('彎道上前方的照相照常報', R.彎道.filter(x => /速限100/.test(x.t)).length >= 2);
   ok('沒有亂報「已通過」（沒提醒過的照相）', !R.國道.some(x => /已通過/.test(x.t) && R.國道.findIndex(y => /速限/.test(y.t)) < 0));
+  ok('最後一聲（就在前方）紅框閃一次，前兩聲不閃', R.紅框.length === 1 && /^測速照相，速限100/.test(R.紅框[0] || ''));
+  const idle = await page.evaluate(() => { LP.paintAlert(null); const b = document.getElementById('alertBox');
+    return { cls: b.className, label: document.getElementById('alertLabel').textContent, sub: document.getElementById('alertSub').textContent }; });
+  ok('前方沒有測速時顯示「鹿豹行車警示」和網址', idle.cls === 'idle' && idle.label === '鹿豹行車警示' && /github\.io\/luleopard/.test(idle.sub));
   ok('沒有頁面錯誤', errs.length === 0);
 
   await browser.close();

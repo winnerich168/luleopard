@@ -37,6 +37,16 @@ button{font-family:inherit;color:inherit;background:none;border:none;cursor:poin
 #alertBox.t3{background:#3f1616;border-color:var(--danger);animation:pulse .7s infinite alternate}
 @keyframes pulse{from{box-shadow:0 0 0 0 rgba(255,77,77,.0)}to{box-shadow:0 0 0 6px rgba(255,77,77,.18)}}
 #alertTitle{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+#alertBox.idle #alertLabel{color:var(--accent);font-size:18px;letter-spacing:3px;white-space:nowrap}
+/* 平常狀態不放盾牌圖示：「鹿豹行車警示」和下面的網址左邊對齊，網址也多一點空間 */
+#alertBox.idle #alertIcon{display:none}
+#alertBox.idle #alertSub{color:#e8eef5;font-weight:600;font-size:11px;letter-spacing:-.1px}
+#alertBox.idle #alertLabel small{font-size:14px;letter-spacing:2px;color:#e8d9a0;margin-left:4px}
+/* 最後一聲（就在前方）：整個畫面邊框紅色閃一下 */
+#edgeFlash{position:fixed;inset:0;z-index:5000;pointer-events:none;opacity:0;
+  box-shadow:inset 0 0 0 10px rgba(255,59,48,.95),inset 0 0 60px 24px rgba(255,59,48,.55)}
+#edgeFlash.on{animation:edgeFlash 1.1s ease-out}
+@keyframes edgeFlash{0%{opacity:0}12%{opacity:1}40%{opacity:.35}55%{opacity:1}100%{opacity:0}}
 #alertSub{font-size:12px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #alertDist{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
 #limitBadge{width:56px;height:56px;border-radius:50%;background:#fff;color:#111;display:flex;align-items:center;
@@ -393,7 +403,7 @@ textarea{resize:vertical;min-height:74px}
 <div id="hud">
   <div id="hudTop">
     <div id="spdBox"><div id="spd">--</div><div id="spdUnit">KM/H</div></div>
-    <div id="alertBox">
+    <div id="alertBox" class="idle">
       <div id="alertTitle"><span id="alertIcon">🛡️</span><span id="alertLabel">前方無測速點</span>
         <span id="alertDist" style="margin-left:auto"></span></div>
       <div id="alertSub">等待 GPS 定位…</div>
@@ -968,7 +978,8 @@ const BigStore=(function(){
 /* ---------- 1. 設定 ---------- */
 /* 版本與階段。公測期間要讓使用者清楚知道：資料還沒補齊、警示可能會漏，
    一切以現場標誌為準。等各縣市資料補齊、實車跑過一段時間再拿掉 BETA。 */
-const APP_VER='v2.0.2';
+const APP_URL='winnerich168.github.io/luleopard';
+const APP_VER='v2.0.3';
 const APP_STAGE='公測版';
 /* 建置序號：YYYYMMDD.HHmm（台灣時間）。
    公測期間版號會一直跳，語意化版號（v1.5）分不出「今天早上那版」和
@@ -1747,17 +1758,27 @@ function announce(cam,d,tier,over,kmh,speedOk){
   if(tier===PRE){ Audio_.beep(560,.1,.07); Audio_.vibe(50); }
   if(tier===1){ Audio_.beep(660,.14); Audio_.vibe(80); }
   if(tier===2){ Audio_.beep(880,.16); Audio_.vibe([90,60,90]); }
-  if(tier===3){ Audio_.beep(1180,.22,.13); Audio_.vibe([140,70,140,70,180]); }
+  if(tier===3){ Audio_.beep(1180,.22,.13); Audio_.vibe([140,70,140,70,180]); edgeFlash(); }
   return true;
 }
 
+/** 畫面邊框紅色閃一下：測速照相、事故的最後一聲（就在前方） */
+function edgeFlash(){
+  let f=el('edgeFlash');
+  if(!f){ f=document.createElement('div'); f.id='edgeFlash'; document.body.appendChild(f); }
+  f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
+}
 function paintAlert(a){
   const box=el('alertBox'), badge=el('limitBadge');
   box.className='';
   if(!a){
     el('alertIcon').textContent='🛡️';
-    el('alertLabel').textContent= CAMS.length? '前方無測速點' : '尚未載入點位';
-    el('alertSub').textContent= GPS.ok? '監控中 · 資料庫 '+CAMS.length+' 點' : '等待 GPS 定位…';
+    // 前方沒有測速時這格放工具名稱，不寫「前方無測速點」
+    if(CAMS.length) box.className='idle';
+    if(CAMS.length) el('alertLabel').innerHTML='鹿豹<small>行車警示</small>';
+    else el('alertLabel').textContent='尚未載入點位';
+    // 截圖、錄影上傳 YouTube 時，看的人從畫面就找得到 App：平常這行放網址
+    el('alertSub').textContent= GPS.ok? (CAMS.length?APP_URL:'監控中 · 資料庫 0 點') : '等待 GPS 定位…';
     el('alertDist').textContent=''; badge.classList.add('off'); badge.textContent='--';
     el('hudBarFill').style.width='0'; return;
   }
@@ -3249,7 +3270,7 @@ function announceHaz(h,d,tier){
   if(tier===1){ Audio_.beep(520,.16); Audio_.vibe(90); }
   if(tier===2){ Audio_.beep(700,.18); Audio_.vibe([100,60,100]); }
   hazPassWatch(h,d);
-  if(tier===3){ Audio_.beep(s>=3?1000:820,.26,.14); Audio_.vibe([160,70,160,70,200]); }
+  if(tier===3){ Audio_.beep(s>=3?1000:820,.26,.14); Audio_.vibe([160,70,160,70,200]); if(h.type==='事故') edgeFlash(); }
   return true;
 }
 
@@ -5780,7 +5801,7 @@ function boot(){
   weatherBoot();
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pingOnline(); });
   // 對外測試介面
-  window.LP={evaluate,dist,bearing,dirHeadings,dirMatch,onPos,CAMS:()=>CAMS,CFG,tierDist,feedUpdate,
+  window.LP={edgeFlash,paintAlert,evaluate,dist,bearing,dirHeadings,dirMatch,onPos,CAMS:()=>CAMS,CFG,tierDist,feedUpdate,
              parseKmName,buildKmAnchors,kmEstimate,kmLock,kmToLatLon,kmChoices,KM,
              Native,startGPS,GPS,POWER,powerTick,powerEnter,powerExit,powerReset,
              WAKE,wakeAcquire,wakeRelease,paintWake,

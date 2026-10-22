@@ -72,6 +72,10 @@ const fs = require('fs');
       official: 'open', src: 'official', mine: false })]));
   }, M);
 
+  // 紅框閃幾次（每次加上 .on 算一次）
+  await page.evaluate(() => { window.__flash = 0; new MutationObserver(recs => {
+    if (recs.some(r => r.target.id === 'edgeFlash' && r.target.classList.contains('on') && !/\bon\b/.test(r.oldValue || ''))) window.__flash++;
+  }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true }); });
   const v = 27.8;                          // 時速 100，每秒一筆定位
   for (let i = 0; i < 330; i++) {
     await page.evaluate(([i, v, M]) => LP.onPos(24.0 + i * v * M, 121.0, 0, v, 5, false), [i, v, M]);
@@ -79,6 +83,7 @@ const fs = require('fs');
   }
   await page.clock.runFor(15000);
   const log = await page.evaluate(() => window.__speech);
+  const flashes = await page.evaluate(() => window.__flash);
   const done = log.filter(l => l.done).map(l => l.txt);
   const cut = log.filter(l => !l.done).map(l => l.txt);
 
@@ -105,6 +110,8 @@ const fs = require('fs');
   ok('回報頁的施工從遠到近', done.some(t => /^前方\d+公尺，(\d+分鐘前回報，)?注意施工/.test(t)) && done.some(t => /^施工就在前方/.test(t)));
   ok('官方事件有播報', done.some(t => /官方通報/.test(t)) && done.filter(t => /事故就在前方/.test(t)).length >= 2);
   ok('第一聲只唸一次', done.filter(t => /^前方\d+公尺，測速照相/.test(t)).length === 1);
+  const acc3 = done.filter(t => /^事故就在前方/.test(t)).length;
+  ok('紅框只在測速、事故的最後一聲閃（施工不閃）：' + flashes + ' 次', acc3 >= 2 && flashes === 1 + acc3);
   ok('沒有頁面錯誤', errs.length === 0);
 
   await browser.close();
