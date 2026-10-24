@@ -3975,15 +3975,15 @@ const RADIO_PBS=[
   {n:'臺北分臺',c:'TPS',la:25.04,lo:121.53},{n:'新竹分臺',c:'SCS',la:24.80,lo:120.97},
   {n:'臺中分臺',c:'TCS',la:24.15,lo:120.67},{n:'臺南分臺',c:'TNS',la:22.99,lo:120.21},
   {n:'高雄分臺',c:'KSS',la:22.63,lo:120.30},{n:'宜蘭分臺',c:'ELS',la:24.75,lo:121.75},
-  {n:'花蓮分臺',c:'HLS',la:23.98,lo:121.60},{n:'臺東分臺',c:'TTS',la:22.76,lo:121.14}];
+  {n:'花蓮分臺',c:'HLS',la:23.98,lo:121.60}];   // 臺東分臺（TTS）官方串流已失效，先拿掉
 const RADIO_BCC=['中廣新聞網','中廣流行網 i like radio','中廣音樂網 i radio','中廣鄉親網','i Go 531'];
 const RADIO_BCC_APP={ios:'https://apps.apple.com/tw/app/id1182874270',
   android:'https://play.google.com/store/apps/details?id=tw.com.wonderwall.bcc_player'};
 const RADIO_MORE=[
-  {n:'國立教育廣播電臺',d:'教育、文化；另有彰化、高雄、花蓮、臺中、臺東台',u:'https://www.ner.gov.tw/Channel/Taipei/'},
-  {n:'中央廣播電臺 華語',d:'新聞、國際',u:'https://www.rti.org.tw/program?uid=4&pid=88'},
+  {n:'國立教育廣播電臺',d:'教育、文化；另有彰化、高雄、花蓮、臺中、臺東台',u:'https://www.ner.gov.tw/Program/List/?id=1'},
+  {n:'中央廣播電臺 華語',d:'新聞、國際',u:'https://www.rti.org.tw/'},
   {n:'臺北廣播電臺',d:'臺北市政府',u:'https://tradio.gov.taipei/'},
-  {n:'Hit FM 聯播網',d:'流行音樂',u:'http://www.hitoradio.com/onair.php'},
+  {n:'Hit FM 聯播網',d:'流行音樂',u:'https://www.hitoradio.com/newweb/onair.php'},
   {n:'KISS RADIO 大眾廣播 FM99.9',d:'流行音樂，南部',u:'https://www.kiss.com.tw/radio_hq.php?radio_id=156'}];
 const pbsUrl=c=>'https://www.pbs.gov.tw/live/index.html?name='+c;
 let RADIO_TAB=Store.get(K('radioTab'),'pbs');
