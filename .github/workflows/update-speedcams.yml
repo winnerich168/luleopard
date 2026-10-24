@@ -6,6 +6,7 @@ on:
     - cron: "0 22 * * 0"
   workflow_dispatch:          # 也可以在 Actions 頁面手動按一下就跑
   push:
+    branches: [main]      # 推版號 tag 時不要跑：tag 是 detached HEAD，最後 git push 會失敗
     paths:
       - "etl/**"
       - ".github/workflows/update-speedcams.yml"
